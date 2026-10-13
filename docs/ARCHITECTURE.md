@@ -315,6 +315,8 @@ Claude rejects unsupported JSON Schema features. The plugin uses an **allowlist 
 
 Location: `~/.config/opencode/antigravity-accounts.json`
 
+Several account managers can hold the pool in memory at once (one per opencode location, plus an older request pipeline until it is dropped), and saves merge with the file by refresh token. When a sign-in replaces an account's token, or an account is removed, the old token is **retired**: its SHA-256 fingerprint goes into `retiredTokenHashes`, and merges, replacing writes and loads drop accounts carrying it. Merges also update a same-email entry in place, so positions stay valid. A sign-in that writes a previously retired token lifts its retirement.
+
 Contains OAuth refresh tokens - treat as sensitive.
 
 ---

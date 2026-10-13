@@ -39,7 +39,7 @@ import {
 import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
-import { clearAccounts, loadAccounts, saveAccounts, saveAccountsReplace } from "./plugin/storage";
+import { clearAccounts, hashRefreshToken, loadAccounts, saveAccounts, saveAccountsReplace } from "./plugin/storage";
 import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, computeSoftQuotaCacheTtlMs } from "./plugin/accounts";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
@@ -776,6 +776,9 @@ export async function persistAccountPool(
 
   const indexByRefreshToken = new Map<string, number>();
   const indexByEmail = new Map<string, number>();
+  // Tokens replaced by this sign-in: retire them so stale account managers can't merge them back.
+  const replacedTokens: string[] = [];
+  const signedInTokens: string[] = [];
   for (let i = 0; i < accounts.length; i++) {
     const acc = accounts[i];
     if (acc?.refreshToken) {
@@ -840,6 +843,7 @@ export async function persistAccountPool(
     if (oldToken !== parts.refreshToken) {
       indexByRefreshToken.delete(oldToken);
       indexByRefreshToken.set(parts.refreshToken, existingIndex);
+      replacedTokens.push(oldToken);
     }
   }
 
@@ -852,15 +856,21 @@ export async function persistAccountPool(
     ? 0 
     : (typeof stored?.activeIndex === "number" && Number.isFinite(stored.activeIndex) ? stored.activeIndex : 0);
 
-  await saveAccounts({
-    version: 4,
-    accounts,
-    activeIndex: clampInt(activeIndex, 0, accounts.length - 1),
-    activeIndexByFamily: {
-      claude: clampInt(activeIndex, 0, accounts.length - 1),
-      gemini: clampInt(activeIndex, 0, accounts.length - 1),
+  for (const account of accounts) signedInTokens.push(account.refreshToken);
+
+  await saveAccounts(
+    {
+      version: 4,
+      accounts,
+      activeIndex: clampInt(activeIndex, 0, accounts.length - 1),
+      activeIndexByFamily: {
+        claude: clampInt(activeIndex, 0, accounts.length - 1),
+        gemini: clampInt(activeIndex, 0, accounts.length - 1),
+      },
+      ...(replacedTokens.length > 0 ? { retiredTokenHashes: replacedTokens.map(hashRefreshToken) } : {}),
     },
-  });
+    { unretireTokens: signedInTokens },
+  );
 }
 
 function buildAuthSuccessFromStoredAccount(account: {

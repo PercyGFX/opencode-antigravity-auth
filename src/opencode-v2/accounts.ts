@@ -1,6 +1,13 @@
 import { formatRefreshParts, parseRefreshParts } from "../plugin/auth";
 import type { AccountManager } from "../plugin/accounts";
-import { loadAccounts, saveAccountsReplace, type AccountMetadataV3, type AccountStorageV4 } from "../plugin/storage";
+import {
+  hashRefreshToken,
+  loadAccounts,
+  retireRefreshTokens,
+  saveAccountsReplace,
+  type AccountMetadataV3,
+  type AccountStorageV4,
+} from "../plugin/storage";
 import type { OAuthAuthDetails } from "../plugin/types";
 
 export class AccountNotFoundError extends Error {
@@ -64,14 +71,19 @@ export async function removeAccount(manager: AccountManager | null, index: numbe
     const accounts = manager.getAccounts();
     const account = accounts[findAccount(accounts, index, email)];
     if (!account || !manager.removeAccount(account)) throw new AccountNotFoundError(email);
-    // A merging save would bring the removed account back from the file.
+    // A merging save would bring the removed account back from the file, and other account
+    // managers still holding it would merge it back later: replace the file and retire the token.
     await manager.saveToDisk({ replace: true });
+    await retireRefreshTokens([account.parts.refreshToken]);
     return manager.getAccountCount();
   }
   const storage = await loadPool();
   const position = findAccount(storage.accounts, index, email);
   if (position < 0) throw new AccountNotFoundError(email);
-  storage.accounts.splice(position, 1);
+  const [removed] = storage.accounts.splice(position, 1);
+  if (removed) {
+    storage.retiredTokenHashes = [...(storage.retiredTokenHashes ?? []), hashRefreshToken(removed.refreshToken)];
+  }
   const length = storage.accounts.length;
   storage.activeIndex = shiftIndex(storage.activeIndex, position, length) ?? 0;
   if (storage.activeIndexByFamily) {

@@ -107,3 +107,20 @@ describe("poolAuth", () => {
     await expect(poolAuth(login)).resolves.toBe(login);
   });
 });
+
+describe("stale account managers", () => {
+  it("can't bring back an account removed through another manager", async () => {
+    const live = new AccountManager(undefined, structuredClone(POOL));
+    const stale = new AccountManager(undefined, structuredClone(POOL)); // e.g. another opencode location
+    await removeAccount(live, 1, "b@gmail.com");
+    await stale.saveToDisk();
+    expect(readPool().accounts.map((account) => account.email)).toEqual(["a@gmail.com", "c@gmail.com"]);
+  });
+
+  it("can't bring back a removed account after a removal without a running pipeline", async () => {
+    const stale = new AccountManager(undefined, structuredClone(POOL));
+    await removeAccount(null, 2, "c@gmail.com");
+    await stale.saveToDisk();
+    expect(readPool().accounts.map((account) => account.email)).toEqual(["a@gmail.com", "b@gmail.com"]);
+  });
+});
