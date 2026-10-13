@@ -1,5 +1,5 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth";
-import { loadAccounts, saveAccounts, type AccountStorageV4, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
+import { loadAccounts, saveAccounts, saveAccountsReplace, type AccountStorageV4, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
@@ -511,6 +511,7 @@ export class AccountManager {
     pidOffsetEnabled: boolean = false,
     softQuotaThresholdPercent: number = 100,
     softQuotaCacheTtlMs: number = 10 * 60 * 1000,
+    allowQuotaFallback: boolean = true,
   ): ManagedAccount | null {
     const quotaKey = getQuotaKey(family, headerStyle, model);
 
@@ -535,7 +536,11 @@ export class AccountManager {
             index: acc.index,
             lastUsed: acc.lastUsed,
             healthScore: healthTracker.getScore(acc.index),
-            isRateLimited: isRateLimitedForFamily(acc, family, model) || 
+            // With quota fallback, an account is usable while either Gemini pool is free; without
+            // it, only the requested pool counts (otherwise a limited account keeps being picked).
+            isRateLimited: (allowQuotaFallback
+                            ? isRateLimitedForFamily(acc, family, model)
+                            : isRateLimitedForHeaderStyle(acc, family, headerStyle, model)) ||
                           isOverSoftQuotaThreshold(acc, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model),
             isCoolingDown: this.isAccountCoolingDown(acc),
           };
@@ -988,7 +993,11 @@ export class AccountManager {
     return [...this.accounts];
   }
 
-  async saveToDisk(): Promise<void> {
+  /**
+   * Writes the pool to disk. By default the file is merged with what is on disk; pass
+   * `replace` after removing accounts, or the merge would bring them back.
+   */
+  async saveToDisk(options: { replace?: boolean } = {}): Promise<void> {
     const claudeIndex = Math.max(0, this.currentAccountIndexByFamily.claude);
     const geminiIndex = Math.max(0, this.currentAccountIndexByFamily.gemini);
     
@@ -1022,7 +1031,7 @@ export class AccountManager {
       },
     };
 
-    await saveAccounts(storage);
+    await (options.replace ? saveAccountsReplace(storage) : saveAccounts(storage));
   }
 
   requestSaveToDisk(): void {

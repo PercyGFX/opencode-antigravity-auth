@@ -10,6 +10,17 @@ Create `~/.config/opencode/antigravity.json` (or `.opencode/antigravity.json` in
 
 Most settings have sensible defaults — only configure what you need.
 
+The same file and options work on OpenCode 1.x and 2.x. On **OpenCode 2** a few options have no effect, because the parts of OpenCode they use are not available to the plugin there:
+
+| Option | Why it has no effect on OpenCode 2 |
+|--------|------------------------------------|
+| `session_recovery`, `auto_resume`, `resume_text` | Recovery of interrupted tool calls is driven by session events, which the OpenCode 2 build does not receive yet |
+| `quiet_mode`, `toast_scope` | The plugin cannot show toasts on OpenCode 2 |
+| `debug_tui` | No TUI log panel for server plugins; use `debug` (file logs) instead |
+| `auto_update` | The OpenCode 2 build runs from a local clone, so update with `git pull` |
+
+Account rotation, quota, scheduling, thinking and debug-file options behave the same on both versions.
+
 ---
 
 ## Quick Start
@@ -24,7 +35,7 @@ Most settings have sensible defaults — only configure what you need.
 
 **With web search enabled:**
 
-The plugin provides a `google_search` tool that the model can call to search the web. No configuration is needed - the tool is always available.
+The plugin provides a `google_search` tool that the model can call to search the web. No configuration is needed - the tool is always available on OpenCode 1.x. It has not been ported to OpenCode 2 yet.
 
 ---
 
@@ -35,9 +46,9 @@ Settings that affect how the model thinks and responds.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `keep_thinking` | `false` | Preserve Claude's thinking blocks across turns. **Warning:** enabling may degrade model stability. |
-| `session_recovery` | `true` | Auto-recover from tool_result_missing errors |
-| `auto_resume` | `false` | Auto-send resume prompt after recovery |
-| `resume_text` | `"continue"` | Text to send when auto-resuming |
+| `session_recovery` | `true` | Auto-recover from tool_result_missing errors (OpenCode 1.x only) |
+| `auto_resume` | `false` | Auto-send resume prompt after recovery (OpenCode 1.x only) |
+| `resume_text` | `"continue"` | Text to send when auto-resuming (OpenCode 1.x only) |
 
 > **Note:** The `web_search` config options are deprecated. Google Search is now implemented as a dedicated `google_search` tool that the model can call explicitly.
 
@@ -89,10 +100,10 @@ Settings that control plugin behavior.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `quiet_mode` | `false` | Hide toast notifications (except recovery) |
+| `quiet_mode` | `false` | Hide toast notifications (except recovery; OpenCode 1.x only) |
 | `debug` | `false` | Enable debug logging |
 | `log_dir` | OS default | Custom directory for debug logs |
-| `auto_update` | `true` | Enable automatic plugin updates |
+| `auto_update` | `true` | Enable automatic plugin updates (OpenCode 1.x only) |
 
 ### Debug Logging
 
@@ -159,8 +170,8 @@ These settings are already `true` by default — you don't need to set them:
 
 | Setting | Default | What it does |
 |---------|---------|--------------|
-| `session_recovery` | `true` | Auto-recover from errors |
-| `auto_update` | `true` | Keep plugin updated |
+| `session_recovery` | `true` | Auto-recover from errors (OpenCode 1.x only) |
+| `auto_update` | `true` | Keep plugin updated (OpenCode 1.x only) |
 | `switch_on_first_rate_limit` | `true` | Fast account switching |
 
 These settings are `false` by default:

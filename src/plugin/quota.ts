@@ -109,7 +109,8 @@ function parseResetTime(resetTime?: string): number | null {
 
 function classifyQuotaGroup(modelName: string, displayName?: string): QuotaGroup | null {
   const combined = `${modelName} ${displayName ?? ""}`.toLowerCase();
-  if (combined.includes("claude")) {
+  // GPT-OSS draws on the same Antigravity bucket as Claude.
+  if (combined.includes("claude") || combined.includes("gpt-oss")) {
     return "claude";
   }
   const isGemini3 = combined.includes("gemini-3") || combined.includes("gemini 3");

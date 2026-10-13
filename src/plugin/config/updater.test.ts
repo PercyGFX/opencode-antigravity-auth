@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { updateOpencodeConfig } from "./updater";
 import { OPENCODE_MODEL_DEFINITIONS } from "./models";
+import { builtinRegistryModels, resetRegistryForTests } from "../model-registry";
 
 describe("updateOpencodeConfig", () => {
   let tempDir: string;
@@ -11,6 +12,8 @@ describe("updateOpencodeConfig", () => {
   let originalXdgConfigHome: string | undefined;
 
   beforeEach(() => {
+    // The writer uses the current model list; pin it to the built-in one (no on-disk cache).
+    resetRegistryForTests(builtinRegistryModels());
     originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
     // Create a temporary directory for each test
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-test-"));
@@ -18,6 +21,7 @@ describe("updateOpencodeConfig", () => {
   });
 
   afterEach(() => {
+    resetRegistryForTests();
     if (originalXdgConfigHome === undefined) {
       delete process.env.XDG_CONFIG_HOME;
     } else {
@@ -66,7 +70,7 @@ describe("updateOpencodeConfig", () => {
     // Old model should be replaced
     expect(writtenConfig.provider.google.models["old-model"]).toBeUndefined();
     // New models should be present
-    expect(writtenConfig.provider.google.models["antigravity-gemini-3-pro"]).toBeDefined();
+    expect(writtenConfig.provider.google.models["antigravity-gemini-3.8-flash"]).toBeDefined();
     expect(writtenConfig.provider.google.models["antigravity-claude-sonnet-4-6"]).toBeDefined();
   });
 
@@ -235,7 +239,7 @@ describe("updateOpencodeConfig", () => {
     expect(writtenConfig.plugin).toContain("other-plugin");
     expect(writtenConfig.plugin).toContain("opencode-antigravity-auth@latest");
     expect(writtenConfig.provider.google.region).toBe("us-central1");
-    expect(writtenConfig.provider.google.models["antigravity-gemini-3-pro"]).toBeDefined();
+    expect(writtenConfig.provider.google.models["antigravity-gemini-3.8-flash"]).toBeDefined();
   });
 
   test("prefers existing opencode.jsonc when using default config path", async () => {

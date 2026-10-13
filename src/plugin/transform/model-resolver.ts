@@ -271,7 +271,8 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
  */
 export function getModelFamily(model: string): "claude" | "gemini-flash" | "gemini-pro" {
   const lower = model.toLowerCase();
-  if (lower.includes("claude")) {
+  // GPT-OSS shares the Claude quota bucket upstream.
+  if (lower.includes("claude") || lower.includes("gpt")) {
     return "claude";
   }
   if (lower.includes("flash")) {

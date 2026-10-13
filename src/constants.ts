@@ -145,6 +145,21 @@ export function getRandomizedHeaders(style: HeaderStyle, model?: string): Header
   };
 }
 
+/**
+ * User-Agent of the current Antigravity client ("hub"). Antigravity only serves some newer
+ * models (e.g. Gemini 3.7/3.8 Flash tiers) to this client: their IDs are missing from
+ * `fetchAvailableModels` and return 404 under the legacy `antigravity/<ver> <os>/<arch>` UA.
+ * Model discovery records which IDs need it (see `src/plugin/model-registry.ts`).
+ */
+export const ANTIGRAVITY_HUB_VERSION = "2.8.0";
+export const ANTIGRAVITY_HUB_CL = "963137146";
+
+export function getHubUserAgent(): string {
+  const osType = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
+  const arch = process.arch === "arm64" ? "arm64" : "amd64";
+  return `antigravity/hub/${ANTIGRAVITY_HUB_VERSION} (aidev_client; os_type=${osType}; arch=${arch}; cl=${ANTIGRAVITY_HUB_CL})`;
+}
+
 export type HeaderStyle = "antigravity" | "gemini-cli";
 
 /**

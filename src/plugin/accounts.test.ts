@@ -1843,6 +1843,36 @@ describe("AccountManager", () => {
   });
 });
 
+describe("hybrid selection without quota fallback", () => {
+  const stored: AccountStorageV4 = {
+    version: 4,
+    accounts: [
+      { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+      { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+    ],
+    activeIndex: 0,
+  };
+  const model = "antigravity-gemini-3.1-pro";
+  const select = (manager: AccountManager, allowQuotaFallback: boolean) =>
+    manager.getCurrentOrNextForFamily("gemini", model, "hybrid", "antigravity", false, 100, 600_000, allowQuotaFallback);
+
+  it("returns no account when Antigravity is limited everywhere, so the caller waits instead of spinning", () => {
+    const manager = new AccountManager(undefined, structuredClone(stored));
+    for (const account of manager.getAccounts()) {
+      manager.markRateLimited(account, 60_000, "gemini", "antigravity", model);
+    }
+    expect(select(manager, false)).toBeNull();
+  });
+
+  it("still treats the Gemini CLI pool as usable when fallback is allowed", () => {
+    const manager = new AccountManager(undefined, structuredClone(stored));
+    for (const account of manager.getAccounts()) {
+      manager.markRateLimited(account, 60_000, "gemini", "antigravity", model);
+    }
+    expect(select(manager, true)).not.toBeNull();
+  });
+});
+
 describe("resolveQuotaGroup", () => {
   it("returns model-based quota group when model is provided", () => {
     expect(resolveQuotaGroup("claude", "claude-opus-4-6-thinking")).toBe("claude");

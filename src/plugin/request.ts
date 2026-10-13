@@ -6,10 +6,12 @@ import {
   EMPTY_SCHEMA_PLACEHOLDER_NAME,
   EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
   SKIP_THOUGHT_SIGNATURE,
+  getHubUserAgent,
   getRandomizedHeaders,
   type HeaderStyle,
 } from "../constants";
 import { cacheSignature, getCachedSignature } from "./cache";
+import { resolveUpstreamModel } from "./model-registry";
 import { getKeepThinking } from "./config";
 import {
   createStreamingTransformer,
@@ -809,6 +811,21 @@ export function prepareAntigravityRequest(
   const resolved = resolveModelForHeaderStyle(rawModel, headerStyle);
   let effectiveModel = resolved.actualModel;
 
+  // The model ID sent upstream. For models in the registry (Antigravity's own list), the
+  // requested model and tier map to the exact upstream ID, e.g. gemini-3.8-flash + high →
+  // gemini-3.8-flash-high. effectiveModel keeps the name the transformation logic expects.
+  let wireModel = effectiveModel;
+  let useHubUserAgent = false;
+  const applyUpstreamModel = (tier?: string) => {
+    if (headerStyle !== "antigravity") return undefined;
+    const upstream = resolveUpstreamModel(rawModel, tier);
+    if (!upstream) return undefined;
+    wireModel = upstream.upstreamId;
+    useHubUserAgent = upstream.hubOnly;
+    return upstream;
+  };
+  const initialUpstream = applyUpstreamModel(resolved.tier);
+
   const streaming = rawAction === STREAM_ACTION;
   const defaultEndpoint = headerStyle === "gemini-cli" ? GEMINI_CLI_ENDPOINT : ANTIGRAVITY_ENDPOINT;
   const baseEndpoint = endpointOverride ?? defaultEndpoint;
@@ -838,7 +855,7 @@ export function prepareAntigravityRequest(
       if (isWrapped) {
         const wrappedBody = {
           ...parsedBody,
-          model: effectiveModel,
+          model: wireModel,
         } as Record<string, unknown>;
 
         // Some callers may already send an Antigravity-wrapped body.
@@ -938,6 +955,14 @@ export function prepareAntigravityRequest(
             tierThinkingBudget = variantConfig.thinkingBudget;
             tierThinkingLevel = undefined;
           }
+        }
+
+        // Registry models with tiers: the chosen tier selects the upstream model, and the
+        // thinking level sent must match it (no variant → Antigravity's default tier).
+        const upstream = (variantConfig?.thinkingLevel && applyUpstreamModel(variantConfig.thinkingLevel)) || initialUpstream;
+        if (upstream?.tier && isGemini3) {
+          tierThinkingLevel = upstream.tier;
+          tierThinkingBudget = undefined;
         }
 
         if (isClaude) {
@@ -1495,7 +1520,7 @@ export function prepareAntigravityRequest(
 
         const wrappedBody: Record<string, unknown> = {
           project: effectiveProjectId,
-          model: effectiveModel,
+          model: wireModel,
           request: requestPayload,
         };
 
@@ -1547,6 +1572,10 @@ export function prepareAntigravityRequest(
     const fingerprintHeaders = buildFingerprintHeaders(fingerprint);
 
     headers.set("User-Agent", fingerprintHeaders["User-Agent"] || selectedHeaders["User-Agent"]);
+    // Some models are only served to the current Antigravity client (recorded at discovery).
+    if (useHubUserAgent) {
+      headers.set("User-Agent", getHubUserAgent());
+    }
   } else {
     // Gemini CLI mode: match opencode-gemini-auth Code Assist header set exactly
     headers.set("User-Agent", GEMINI_CLI_HEADERS["User-Agent"]);

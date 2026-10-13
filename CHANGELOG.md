@@ -1,5 +1,42 @@
 # Changelog
 
+## [Unreleased] - OpenCode 2 support
+
+### Added
+
+- **OpenCode 2 entry point** - `server.ts` default-exports a v2 plugin (`src/opencode-v2/`). OpenCode 2 loads it from a plugin folder or a package's `./server` export. OpenCode 1.x keeps loading `index.ts` unchanged.
+
+- **`google-antigravity` integration and provider** - Sign-in is an OAuth method on its own integration (`opencode auth login google-antigravity`, or `/connect` in the TUI). Models are registered automatically with their variants, so OpenCode 2 needs no `provider.google.models` config. A separate provider keeps Antigravity from replacing a Gemini API key on `google`. Each login is labeled with its Google email.
+
+- **Model list from Antigravity** - The models come from Antigravity's `fetchAvailableModels` Recommended list, discovered after sign-in and every 6 hours and cached in `antigravity-models.json`; a built-in snapshot is used until then. New models appear and retired ones disappear without a plugin update. Low/Medium/High entries become one model with variants, each mapped to its own upstream ID (`gemini-3.8-flash-high`, `gemini-pro-agent`, ...), and IDs only served to the current Antigravity client get its User-Agent automatically. `node scripts/list-models.mjs` shows what an account is offered.
+
+- **Models** - Added Gemini 3.8, 3.7 and 3.6 Flash (low/medium/high) and GPT-OSS 120B. Removed models Antigravity no longer recommends: Gemini 3 Pro, Gemini 3 Flash, Gemini 3.5 Flash, Gemini 2.5, and the Gemini CLI preview entries.
+
+- **Sidebar limits and account management (TUI plugin)** - `tui.tsx` adds an "Antigravity · 5h limits" section to the session sidebar: each account's remaining 5-hour quota per group (Gemini; Claude & GPT-OSS) with reset times, and the account serving the selected model. Click an account or run `/antigravity` to disable/enable, re-authenticate, remove or add accounts. Backed by the `antigravity` RPC (`rpc.ts`).
+
+- **Sign-in without opening a browser** - The plugin copies the sign-in link to the clipboard and never opens a browser itself; OpenCode's own CLI still opens the link when it runs in a terminal. There are two methods. **Google account (Antigravity)** waits on the 1.x callback page (`localhost:51121`, "All set!") and finishes by itself. **Paste the redirect URL** has no local server, for browsers on another machine. The first method falls back to pasting when the port is busy or in WSL/remote sessions.
+
+- **Loopback proxy** - OpenCode 2's native Gemini client is pointed at a `127.0.0.1` proxy with a per-process secret path. The proxy feeds the unchanged v1 `fetch` interceptor, so account rotation, quota fallback and request transformation are shared by both versions.
+
+### Changed
+
+- `package.json` gains an `exports` map (`.`, `./server`, `./tui`, `./rpc`), and `@opencode/plugin@2.0.26` plus the OpenTUI/Solid types become dev dependencies.
+- GPT-OSS is counted with Claude for rate limits and quota, matching Antigravity's buckets.
+
+### Fixed
+
+- Models from Antigravity's list no longer fall back to the Gemini CLI quota. Accounts without a Gemini CLI license turned a temporary 429 into a 403 "no valid license" error.
+- With quota fallback off, hybrid account selection treated a rate-limited Gemini account as available (its unused Gemini CLI pool looked free). The rotation loop then spun without awaiting and froze OpenCode's background service. Selection now checks only the pool in use.
+- Removing an account saves the pool with a replacing write; the merging save brought removed accounts back.
+
+### Not yet on OpenCode 2
+
+- Session recovery of interrupted tool calls (`session_recovery`, `auto_resume`), toasts and TUI log output from the request pipeline, and the `google_search` tool. (Accounts and quota are handled by the TUI plugin instead of the 1.x terminal menu.)
+
+### Documentation
+
+- README and docs updated for OpenCode 2: installation, sign-in, model IDs (`google-antigravity/<model>#<variant>`), account management, troubleshooting, a 1.x → 2.x migration guide, and the adapter architecture.
+
 ## [1.6.0] - 2026-02-20
 
 ### Fixed

@@ -50,6 +50,7 @@ import { createProactiveRefreshQueue, type ProactiveRefreshQueue } from "./plugi
 import { initLogger, createLogger } from "./plugin/logger";
 import { initHealthTracker, getHealthTracker, initTokenTracker, getTokenTracker } from "./plugin/rotation";
 import { initAntigravityVersion } from "./plugin/version";
+import { resolveUpstreamModel } from "./plugin/model-registry";
 import { executeSearch } from "./plugin/search";
 import type {
   GetAuth,
@@ -91,6 +92,11 @@ let rateLimitToastShown = false;
 
 // Module-level reference to AccountManager for access from auth.login
 let activeAccountManager: import("./plugin/accounts").AccountManager | null = null;
+
+/** The account manager of the running request pipeline, once the loader has built it. */
+export function getActiveAccountManager(): import("./plugin/accounts").AccountManager | null {
+  return activeAccountManager;
+}
 
 function cleanupToastCooldowns(): void {
   if (rateLimitToastCooldowns.size > MAX_TOAST_COOLDOWN_ENTRIES) {
@@ -238,7 +244,7 @@ function isRemoteEnvironment(): boolean {
   return false;
 }
 
-function shouldSkipLocalServer(): boolean {
+export function shouldSkipLocalServer(): boolean {
   return isWSL2() || isRemoteEnvironment();
 }
 
@@ -680,7 +686,7 @@ async function promptOAuthCallbackValue(message: string): Promise<string> {
 
 type OAuthCallbackParams = { code: string; state: string };
 
-function getStateFromAuthorizationUrl(authorizationUrl: string): string {
+export function getStateFromAuthorizationUrl(authorizationUrl: string): string {
   try {
     return new URL(authorizationUrl).searchParams.get("state") ?? "";
   } catch {
@@ -697,7 +703,7 @@ function extractOAuthCallbackParams(url: URL): OAuthCallbackParams | null {
   return { code, state };
 }
 
-function parseOAuthCallbackInput(
+export function parseOAuthCallbackInput(
   value: string,
   fallbackState: string,
 ): OAuthCallbackParams | { error: string } {
@@ -753,7 +759,7 @@ function clampInt(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(value)));
 }
 
-async function persistAccountPool(
+export async function persistAccountPool(
   results: Array<Extract<AntigravityTokenExchangeResult, { type: "success" }>>,
   replaceAll: boolean = false,
 ): Promise<void> {
@@ -1570,6 +1576,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
               config.pid_offset_enabled,
               config.soft_quota_threshold_percent,
               softQuotaCacheTtlMs,
+              allowQuotaFallback,
             );
 
             if (!account && allowQuotaFallback) {
@@ -3369,7 +3376,8 @@ function extractModelFromUrlWithSuffix(urlString: string): string | null {
 function getModelFamilyFromUrl(urlString: string): ModelFamily {
   const model = extractModelFromUrl(urlString);
   let family: ModelFamily = "gemini";
-  if (model && model.includes("claude")) {
+  // GPT-OSS shares the Claude quota bucket upstream.
+  if (model && (model.includes("claude") || model.includes("gpt"))) {
     family = "claude";
   }
   if (isDebugEnabled()) {
@@ -3407,11 +3415,16 @@ function resolveHeaderRoutingDecision(
   const cliFirst = getCliFirst(config);
   const preferredHeaderStyle = getHeaderStyleFromUrl(urlString, family, cliFirst);
   const explicitQuota = isExplicitQuotaFromUrl(urlString);
+  // Models from Antigravity's own list (the model registry) have no Gemini CLI equivalent, so
+  // retrying them on the Gemini CLI quota can only fail; accounts without a Gemini CLI license
+  // would turn a temporary 429 into a 403 "no valid license" error.
+  const model = extractModelFromUrl(urlString);
+  const antigravityOnly = model ? resolveUpstreamModel(model) !== undefined : false;
   return {
     cliFirst,
     preferredHeaderStyle,
     explicitQuota,
-    allowQuotaFallback: family === "gemini",
+    allowQuotaFallback: family === "gemini" && !antigravityOnly,
   };
 }
 
