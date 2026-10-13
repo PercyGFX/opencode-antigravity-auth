@@ -1,12 +1,17 @@
-import type { QuotaAccount, QuotaLimit, QuotaSnapshot } from "../../rpc";
+import type { QuotaAccount, QuotaLimit, QuotaSnapshot, QuotaWindow } from "../../rpc";
 import { createLogger } from "../plugin/logger";
-import { checkAccountsQuota, type AccountQuotaResult, type QuotaGroupSummary } from "../plugin/quota";
+import {
+  checkAccountsQuota,
+  type AccountQuotaResult,
+  type QuotaGroupSummary,
+  type QuotaSummaryGroup,
+} from "../plugin/quota";
 import { loadAccounts } from "../plugin/storage";
 import type { PluginClient } from "../plugin/types";
 
 const log = createLogger("opencode-v2.quota");
 
-/** Antigravity quota windows are 5 hours long; asking more than once a minute adds nothing. */
+/** The shortest quota window is 5 hours; asking more than once a minute adds nothing. */
 const QUOTA_CACHE_MS = 60_000;
 
 type FetchQuota = typeof checkAccountsQuota;
@@ -20,7 +25,33 @@ function toTime(resetTime: string | undefined): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-/** Gemini Pro and Flash draw on one bucket: report the lower remaining and earlier reset. */
+/** "Gemini Models" → "Gemini", "Claude and GPT models" → "Claude & GPT". */
+export function shortGroupName(displayName: string | undefined): string {
+  const name = (displayName ?? "Models").replace(/\s+models$/i, "").replace(/\s+and\s+/i, " & ").trim();
+  return name || "Models";
+}
+
+function summaryWindow(group: QuotaSummaryGroup, window: "5h" | "weekly"): QuotaWindow | null {
+  const bucket = group.buckets?.find(
+    (entry) => entry.window === window || entry.bucketId?.endsWith(window === "5h" ? "-5h" : "-weekly"),
+  );
+  if (!bucket) return null;
+  return { remainingPercent: toPercent(bucket.remainingFraction), resetAt: toTime(bucket.resetTime) };
+}
+
+/** Limits from `retrieveUserQuotaSummary`: per model group, the 5-hour and the weekly window. */
+function summaryLimits(groups: QuotaSummaryGroup[]): QuotaLimit[] {
+  return groups.map((group) => ({
+    name: shortGroupName(group.displayName),
+    fiveHour: summaryWindow(group, "5h"),
+    weekly: summaryWindow(group, "weekly"),
+  }));
+}
+
+/**
+ * Fallback without the summary: per-model 5-hour quota from `fetchAvailableModels`. Gemini Pro
+ * and Flash draw on one bucket, so report the lower remaining and earlier reset.
+ */
 function mergeGroups(name: string, groups: Array<QuotaGroupSummary | undefined>): QuotaLimit | undefined {
   const present = groups.filter((group): group is QuotaGroupSummary => group !== undefined);
   if (present.length === 0) return undefined;
@@ -30,17 +61,24 @@ function mergeGroups(name: string, groups: Array<QuotaGroupSummary | undefined>)
   const resets = present.map((group) => toTime(group.resetTime)).filter((value): value is number => value !== null);
   return {
     name,
-    remainingPercent: remaining.length > 0 ? toPercent(Math.min(...remaining)) : null,
-    resetAt: resets.length > 0 ? Math.min(...resets) : null,
+    fiveHour: {
+      remainingPercent: remaining.length > 0 ? toPercent(Math.min(...remaining)) : null,
+      resetAt: resets.length > 0 ? Math.min(...resets) : null,
+    },
+    weekly: null,
   };
 }
 
 export function toQuotaAccount(result: AccountQuotaResult, inUse: string[]): QuotaAccount {
   const groups = result.quota?.groups ?? {};
-  const limits = [
-    mergeGroups("Gemini", [groups["gemini-pro"], groups["gemini-flash"]]),
-    mergeGroups("Claude & GPT-OSS", [groups.claude]),
-  ].filter((limit): limit is QuotaLimit => limit !== undefined);
+  const summaryGroups = result.quotaSummary?.groups ?? [];
+  const limits =
+    summaryGroups.length > 0
+      ? summaryLimits(summaryGroups)
+      : [
+          mergeGroups("Gemini", [groups["gemini-pro"], groups["gemini-flash"]]),
+          mergeGroups("Claude & GPT", [groups.claude]),
+        ].filter((limit): limit is QuotaLimit => limit !== undefined);
   return {
     index: result.index,
     email: result.email ?? `Account ${result.index + 1}`,

@@ -11,8 +11,9 @@ import {
   accountLevel,
   formatPercent,
   formatReset,
-  limitLevel,
   sortAccounts,
+  windowLevel,
+  windowsOf,
   type QuotaLevel,
 } from "./src/opencode-v2/quota-format";
 
@@ -129,7 +130,9 @@ export default Plugin.define({
             value: account as QuotaAccount | "add",
             description: account.error
               ? account.error
-              : account.limits.map((limit) => `${limit.name} ${formatPercent(limit)}`).join(" · "),
+              : account.limits
+                  .map((limit) => `${limit.name} ${windowsOf(limit).map((entry) => `${entry.label} ${formatPercent(entry.window)}`).join(" ")}`)
+                  .join(" · "),
             footer: !account.enabled ? "disabled" : servesCurrent(account) ? "in use" : account.inUse.join(", "),
           })),
           { title: "Add account", value: "add", description: "Sign in with another Google account" },
@@ -165,7 +168,7 @@ export default Plugin.define({
           <box>
             <text fg={theme.text.base}>
               <b>Antigravity</b>
-              <span style={{ fg: theme.text.muted }}> · 5h limits</span>
+              <span style={{ fg: theme.text.muted }}> · limits</span>
             </text>
             <For each={sortAccounts(snapshot()?.accounts ?? [], currentGroup())}>
               {(account) => (
@@ -195,17 +198,24 @@ export default Plugin.define({
                   >
                     <For each={account.limits}>
                       {(limit) => (
-                        <box flexDirection="row" gap={1} minWidth={0}>
-                          <text fg={theme.text.muted} wrapMode="none" truncate flexGrow={1} flexShrink={1} minWidth={0}>
-                            {`  ${limit.name}`}
-                          </text>
-                          <text fg={color(limitLevel(limit))} wrapMode="none" flexShrink={0}>
-                            {formatPercent(limit)}
-                          </text>
-                          <text fg={theme.text.muted} wrapMode="none" flexShrink={0}>
-                            {formatReset(limit.resetAt, now())}
-                          </text>
-                        </box>
+                        <For each={windowsOf(limit)}>
+                          {(entry, position) => (
+                            <box flexDirection="row" gap={1} minWidth={0}>
+                              <text fg={theme.text.muted} wrapMode="none" truncate flexGrow={1} flexShrink={1} minWidth={0}>
+                                {position() === 0 ? `  ${limit.name}` : ""}
+                              </text>
+                              <text fg={theme.text.muted} wrapMode="none" flexShrink={0}>
+                                {entry.label}
+                              </text>
+                              <text fg={color(windowLevel(entry.window))} wrapMode="none" flexShrink={0}>
+                                {formatPercent(entry.window).padStart(4)}
+                              </text>
+                              <text fg={theme.text.muted} wrapMode="none" flexShrink={0}>
+                                {formatReset(entry.window.resetAt, now()).padStart(6)}
+                              </text>
+                            </box>
+                          )}
+                        </For>
                       )}
                     </For>
                   </Show>

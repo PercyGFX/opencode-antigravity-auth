@@ -5,14 +5,21 @@ import { z } from "zod";
 /** Declared so the user sees why an account action failed (undeclared errors are masked). */
 const ActionErrors = { failed: z.object({}) };
 
-/** One Antigravity quota window (5 hours) for a group of models. */
-export const QuotaLimitSchema = z.object({
-  /** "Gemini" or "Claude & GPT-OSS" — the buckets Antigravity tracks separately. */
-  name: z.string(),
+/** One quota window (5-hour or weekly) of a model group. */
+export const QuotaWindowSchema = z.object({
   /** 0–100, or null when Antigravity did not report it. */
   remainingPercent: z.number().nullable(),
-  /** When the window resets (epoch ms), or null when unknown. */
+  /** When the window fully refreshes (epoch ms), or null when unknown. */
   resetAt: z.number().nullable(),
+});
+
+/** A group of models sharing limits, e.g. "Gemini" or "Claude & GPT". */
+export const QuotaLimitSchema = z.object({
+  name: z.string(),
+  /** The 5-hour limit, which smooths demand across all users. */
+  fiveHour: QuotaWindowSchema.nullable(),
+  /** The weekly limit, tied to the account's plan; null when Antigravity did not report it. */
+  weekly: QuotaWindowSchema.nullable(),
 });
 
 export const QuotaAccountSchema = z.object({
@@ -31,6 +38,7 @@ export const QuotaSnapshotSchema = z.object({
   accounts: z.array(QuotaAccountSchema),
 });
 
+export type QuotaWindow = z.infer<typeof QuotaWindowSchema>;
 export type QuotaLimit = z.infer<typeof QuotaLimitSchema>;
 export type QuotaAccount = z.infer<typeof QuotaAccountSchema>;
 export type QuotaSnapshot = z.infer<typeof QuotaSnapshotSchema>;
