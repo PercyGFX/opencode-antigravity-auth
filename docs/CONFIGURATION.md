@@ -17,7 +17,7 @@ The same file and options work on OpenCode 1.x and 2.x. On **OpenCode 2** a few 
 | `session_recovery`, `auto_resume`, `resume_text` | Recovery of interrupted tool calls is driven by session events, which the OpenCode 2 build does not receive yet |
 | `quiet_mode`, `toast_scope` | The plugin cannot show toasts on OpenCode 2 |
 | `debug_tui` | No TUI log panel for server plugins; use `debug` (file logs) instead |
-| `auto_update` | The OpenCode 2 build runs from a local clone, so update with `git pull` |
+| `auto_update` | OpenCode updates the plugin itself (`opencode plugin update`); a source checkout updates with `git pull` |
 
 Account rotation, quota, scheduling, thinking and debug-file options behave the same on both versions.
 

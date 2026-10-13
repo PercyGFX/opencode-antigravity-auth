@@ -56,29 +56,17 @@ Install the OpenCode 2 build of the opencode-antigravity-auth plugin by followin
 
 **Option B: Manual setup**
 
-1. **Get the plugin.** The OpenCode 2 build is not on npm, so use a local clone:
+1. **Install the plugin** with one command:
 
    ```bash
-   git clone -b opencode-v2 https://github.com/PercyGFX/opencode-antigravity-auth.git
-   cd opencode-antigravity-auth
-   npm install
+   opencode plugin add @percygfx/opencode-antigravity-auth
    ```
 
-   No build step is needed. OpenCode 2 runs the plugin's `server.ts` directly.
+   OpenCode downloads the package and adds it to the `plugins` list in `~/.config/opencode/opencode.json`. There is no need for `npm install -g`: OpenCode keeps its own copy and checks for new versions by itself. Run `opencode plugin update` to update right away.
 
-2. **Add the plugin folder** to `~/.config/opencode/opencode.json` (or `opencode.jsonc`):
+2. **Check it loaded:** `opencode plugin list` should list `opencode-antigravity-auth`. Right after the background service starts, the list can take a few seconds to fill in.
 
-   ```json
-   {
-     "plugin": ["/absolute/path/to/opencode-antigravity-auth"]
-   }
-   ```
-
-   On Windows use forward slashes, for example `"C:/Users/you/opencode-antigravity-auth"`. Point at the **folder**, not a file: OpenCode 2 skips a path to a single `.js` file and logs `configured plugin path must be a directory`.
-
-   Check it loaded: `opencode plugin list` should list `opencode-antigravity-auth`.
-
-   > **Upgrading from 1.x?** Remove the `provider.google.models` block that 1.x setups added to `opencode.json`. The models now come from the plugin, under the `google-antigravity` provider. The old block would only add copies under `google` that bypass the plugin.
+   > **Upgrading from 1.x?** Remove the 1.x `opencode-antigravity-auth` entry from the `plugin` list in `opencode.json`, and remove the `provider.google.models` block that 1.x setups added. The models now come from the plugin, under the `google-antigravity` provider. The old block would only add copies under `google` that bypass the plugin.
 
 3. **Sign in** with your Google account, using either:
    - **TUI:** run `/connect` (or choose **Connect an integration** in the model picker) → **Google Antigravity**. Sending a prompt with nothing connected opens the same dialog.
@@ -108,6 +96,16 @@ Install the OpenCode 2 build of the opencode-antigravity-auth plugin by followin
    opencode run "Hello" --model google-antigravity/antigravity-claude-opus-4-6-thinking#max
    ```
 
+**Option C: From source** (to work on the plugin)
+
+```bash
+git clone -b opencode-v2 https://github.com/PercyGFX/opencode-antigravity-auth.git
+cd opencode-antigravity-auth
+npm install
+```
+
+Add the **folder** to the `plugins` list in `~/.config/opencode/opencode.json`, for example `"plugins": ["C:/Users/you/opencode-antigravity-auth"]` (forward slashes on Windows). Point at the folder, not a file: OpenCode 2 skips a path to a single `.js` file and logs `configured plugin path must be a directory`. OpenCode runs `server.ts` and `tui.tsx` directly, so there is no build step. Use either the folder or the npm package, not both.
+
 </details>
 
 <details>
@@ -117,22 +115,19 @@ Install the OpenCode 2 build of the opencode-antigravity-auth plugin by followin
 
 1. Check that OpenCode is 2.x: `opencode --version`. For 1.x, follow [OpenCode 1.x](#opencode-1x) instead.
 
-2. Clone the OpenCode 2 build and install its dependencies (no build step):
+2. Install the plugin. This also adds it to the global OpenCode configuration:
 
    ```bash
-   git clone -b opencode-v2 https://github.com/PercyGFX/opencode-antigravity-auth.git
-   cd opencode-antigravity-auth && npm install
+   opencode plugin add @percygfx/opencode-antigravity-auth
    ```
 
-3. Edit the OpenCode configuration file at `~/.config/opencode/opencode.json` (or `opencode.jsonc`)
+3. Open the OpenCode configuration file at `~/.config/opencode/opencode.json` (or `opencode.jsonc`). If its `plugin` list still has a 1.x `opencode-antigravity-auth` entry (such as `opencode-antigravity-auth@latest`), remove that entry.
 
    > **Note**: This path works on all platforms. On Windows, `~` resolves to your user home directory (e.g., `C:\Users\YourName`).
 
-4. Add the **absolute path of the cloned folder** to the `plugin` array (forward slashes on Windows). Do not point at a `.js` file.
+4. Remove any `provider.google.models` entries named `antigravity-*` or `gemini-*` left over from a 1.x setup. Do not add model definitions: the plugin registers them under the `google-antigravity` provider.
 
-5. Remove any `provider.google.models` entries named `antigravity-*` or `gemini-*` left over from a 1.x setup. Do not add model definitions: the plugin registers them under the `google-antigravity` provider.
-
-6. Ask the user to sign in, either with `opencode auth login google-antigravity` or from the TUI (`/connect` → **Google Antigravity**). Sign-in needs the user to sign in to Google in a browser, so an agent cannot finish it alone.
+5. Ask the user to sign in, either with `opencode auth login google-antigravity` or from the TUI (`/connect` → **Google Antigravity**). Sign-in needs the user to sign in to Google in a browser, so an agent cannot finish it alone.
 
 ### Verification
 
@@ -146,7 +141,7 @@ opencode run "Hello" --model google-antigravity/antigravity-claude-opus-4-6-thin
 <details>
 <summary><b id="opencode-1x">OpenCode 1.x</b></summary>
 
-OpenCode 1.x loads the original v1 entry point, which is unchanged. The published npm package works:
+OpenCode 1.x loads the original v1 entry point. Use the original npm package, `opencode-antigravity-auth`:
 
 1. **Add the plugin** to `~/.config/opencode/opencode.json`:
 
@@ -364,11 +359,11 @@ opencode auth login google-antigravity
 
 ### OpenCode 2: Plugin Not Loading
 
-1. Run `opencode plugin list`. `opencode-antigravity-auth` should be listed with its `server.ts` path.
-2. The `plugin` entry must be the plugin **folder**. OpenCode 2 skips a path to a single `.js` file and logs `configured plugin path must be a directory`.
-3. A package or folder without a default-exported v2 plugin fails with `Plugin must export a default definition with an id and an effect or setup function`. You have a 1.x build; use the `opencode-v2` branch.
-4. Check the OpenCode server log for `failed to load plugin`: `~/.local/share/opencode/log/opencode.log`.
-5. After editing the plugin's files, restart the background service: `opencode service restart`.
+1. Run `opencode plugin list`. `opencode-antigravity-auth` should be listed, with `@percygfx/opencode-antigravity-auth` (or your source folder) as its source. Right after the background service starts, give it a few seconds and run it again.
+2. A source checkout's entry must be the plugin **folder**. OpenCode 2 skips a path to a single `.js` file and logs `configured plugin path must be a directory`.
+3. A package or folder without a default-exported v2 plugin fails with `Plugin must export a default definition with an id and an effect or setup function`. That is the 1.x package (`opencode-antigravity-auth`); install `@percygfx/opencode-antigravity-auth` instead.
+4. Check the OpenCode log, `~/.local/share/opencode/log/opencode.log`: `failed to load plugin` is the server part (sign-in, models), `plugin operation failed` the TUI part (sidebar limits, `/antigravity`).
+5. After editing a source checkout, restart the background service: `opencode service restart`.
 
 ---
 
@@ -508,7 +503,7 @@ Invalid JSON payload received. Unknown name "parameters" at 'request.tools[0]'
 - Plugin version regression
 
 **Solutions:**
-1. **Update the plugin.** On OpenCode 2, run `git pull` in your clone, then `opencode service restart`. On 1.x, use the latest beta:
+1. **Update the plugin.** On OpenCode 2, run `opencode plugin update` (or `git pull` in a source checkout), then `opencode service restart`. On 1.x, use the latest beta:
    ```json
    { "plugin": ["opencode-antigravity-auth@beta"] }
    ```
@@ -686,7 +681,7 @@ On OpenCode 1.x the correct key is `plugin` (singular):
 ### Migrating Accounts Between Machines
 
 When copying `antigravity-accounts.json` to a new machine:
-1. Ensure the plugin is installed: the plugin folder on OpenCode 2 (see [Installation](#installation)), or `"plugin": ["opencode-antigravity-auth@beta"]` on 1.x
+1. Ensure the plugin is installed: `opencode plugin add @percygfx/opencode-antigravity-auth` on OpenCode 2 (see [Installation](#installation)), or `"plugin": ["opencode-antigravity-auth@beta"]` on 1.x
 2. Copy `~/.config/opencode/antigravity-accounts.json`
 3. On OpenCode 2, sign in once with `opencode auth login google-antigravity`. OpenCode keeps its own connection, separate from the accounts file, and the models only appear once that connection exists.
 4. If you get "API key missing" error, the refresh token may be invalid — re-authenticate
@@ -799,7 +794,7 @@ Control how the plugin handles rate limits:
 | `debug_tui` | `false` | Show debug logs in the TUI log panel (independent from `debug`) |
 | `auto_update` | `true` | Auto-update plugin |
 
-> **OpenCode 2:** the plugin cannot show toasts or write to the TUI log panel, and it has no npm auto-update, because it runs from a local clone. `quiet_mode`, `debug_tui` and `auto_update` therefore have no effect, and toast messages (such as "Using account 2/3") are not shown. To see what the plugin is doing, turn on `debug` for the debug log files. Every other option works the same on both versions.
+> **OpenCode 2:** the plugin cannot show toasts or write to the TUI log panel, and OpenCode updates the plugin itself (`opencode plugin update`). `quiet_mode`, `debug_tui` and `auto_update` therefore have no effect, and toast messages (such as "Using account 2/3") are not shown. To see what the plugin is doing, turn on `debug` for the debug log files. Every other option works the same on both versions.
 
 For all options, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 

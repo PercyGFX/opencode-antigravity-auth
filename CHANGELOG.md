@@ -4,6 +4,8 @@
 
 ### Added
 
+- **npm package** - Published as `@percygfx/opencode-antigravity-auth`. Install with `opencode plugin add @percygfx/opencode-antigravity-auth`, which also adds it to the OpenCode config; OpenCode checks for updates itself. The TUI part ships compiled (`dist/tui.js`), because OpenCode only compiles Solid JSX outside `node_modules`.
+
 - **OpenCode 2 entry point** - `server.ts` default-exports a v2 plugin (`src/opencode-v2/`). OpenCode 2 loads it from a plugin folder or a package's `./server` export. OpenCode 1.x keeps loading `index.ts` unchanged.
 
 - **`google-antigravity` integration and provider** - Sign-in is an OAuth method on its own integration (`opencode auth login google-antigravity`, or `/connect` in the TUI). Models are registered automatically with their variants, so OpenCode 2 needs no `provider.google.models` config. A separate provider keeps Antigravity from replacing a Gemini API key on `google`. Each login is labeled with its Google email.

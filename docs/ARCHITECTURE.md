@@ -164,6 +164,8 @@ OpenCode 2 replaced the 1.x plugin API, and it does not run 1.x plugins. The par
 
 `server.ts` default-exports `createAntigravityV2Plugin()` (`src/opencode-v2/plugin.ts`). OpenCode 2 loads a package's `./server` export, or a plugin folder's `server.*` file (run directly by Bun, so no build is needed). OpenCode 1.x keeps loading `index.ts`.
 
+The TUI part loads the same way: a package's `./tui` export, or a folder's `tui.*` file. OpenCode compiles Solid JSX only for files outside `node_modules`, so the npm package points `./tui` at `dist/tui.js`, which `scripts/build-tui.mjs` compiles from `tui.tsx` with the same transform (`babel-preset-solid`, universal mode on `@opentui/solid`). OpenCode maps that file's `@opentui/solid`, `solid-js` and `@opencode/plugin/tui` imports to its own copies. A folder checkout loads `tui.tsx` directly.
+
 ### Setup
 
 ```

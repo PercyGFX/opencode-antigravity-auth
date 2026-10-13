@@ -1,8 +1,11 @@
 import * as path from "node:path";
 import * as os from "node:os";
 
-export const PACKAGE_NAME = "opencode-antigravity-auth";
-export const NPM_REGISTRY_URL = `https://registry.npmjs.org/-/package/${PACKAGE_NAME}/dist-tags`;
+export const PACKAGE_NAME = "@percygfx/opencode-antigravity-auth";
+/** The package name without its scope: what a local checkout's folder is called. */
+export const PACKAGE_DIR_NAME = PACKAGE_NAME.split("/").pop() ?? PACKAGE_NAME;
+// Scoped names need the slash encoded in registry URLs.
+export const NPM_REGISTRY_URL = `https://registry.npmjs.org/-/package/${PACKAGE_NAME.replace("/", "%2f")}/dist-tags`;
 export const NPM_FETCH_TIMEOUT = 5000;
 
 function getCacheDir(): string {
