@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import lockfile from "proper-lockfile";
 import type { HeaderStyle } from "../constants";
 import { createLogger } from "./logger";
@@ -222,6 +222,12 @@ export interface AccountStorageV4 {
     claude?: number;
     gemini?: number;
   };
+  /**
+   * SHA-256 fingerprints of refresh tokens that were replaced (re-authentication) or removed.
+   * Account managers still holding such a token in memory would otherwise merge it back into
+   * the pool as a separate account on their next save.
+   */
+  retiredTokenHashes?: string[];
 }
 
 type AnyAccountStorage =
@@ -399,45 +405,84 @@ async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Fingerprint of a refresh token, so retired tokens can be recognized without storing them. */
+export function hashRefreshToken(refreshToken: string): string {
+  return createHash("sha256").update(refreshToken).digest("hex").slice(0, 32);
+}
+
+const MAX_RETIRED_TOKEN_HASHES = 200;
+
+function mergeRetired(...lists: Array<readonly string[] | undefined>): string[] {
+  const merged = [...new Set(lists.flatMap((list) => list ?? []))];
+  return merged.slice(-MAX_RETIRED_TOKEN_HASHES);
+}
+
+function withoutRetired<T extends { refreshToken: string }>(accounts: T[], retired: readonly string[]): T[] {
+  if (retired.length === 0) return accounts;
+  const set = new Set(retired);
+  return accounts.filter((account) => !set.has(hashRefreshToken(account.refreshToken)));
+}
+
 function mergeAccountStorage(
   existing: AccountStorageV4,
   incoming: AccountStorageV4,
+  unretiredHashes: readonly string[] = [],
 ): AccountStorageV4 {
-  const accountMap = new Map<string, AccountMetadataV3>();
+  const unretired = new Set(unretiredHashes);
+  const retired = mergeRetired(existing.retiredTokenHashes, incoming.retiredTokenHashes).filter(
+    (hash) => !unretired.has(hash),
+  );
+  const retiredSet = new Set(retired);
+  const isRetired = (acc: AccountMetadataV3) => retiredSet.has(hashRefreshToken(acc.refreshToken));
 
-  for (const acc of existing.accounts) {
-    if (acc.refreshToken) {
-      accountMap.set(acc.refreshToken, acc);
-    }
-  }
+  // Merge in place, so positions (activeIndex, activeIndexByFamily) keep pointing at the same accounts.
+  const merged: AccountMetadataV3[] = [...existing.accounts];
+  const indexByToken = new Map(merged.map((acc, index) => [acc.refreshToken, index] as const));
+  const indexByEmail = new Map(
+    merged.flatMap((acc, index) => (acc.email ? [[acc.email, index] as const] : [])),
+  );
 
   for (const acc of incoming.accounts) {
-    if (acc.refreshToken) {
-      const existingAcc = accountMap.get(acc.refreshToken);
-      if (existingAcc) {
-        accountMap.set(acc.refreshToken, {
-          ...existingAcc,
-          ...acc,
-          // Preserve manually configured projectId/managedProjectId if not in incoming
-          projectId: acc.projectId ?? existingAcc.projectId,
-          managedProjectId: acc.managedProjectId ?? existingAcc.managedProjectId,
-          rateLimitResetTimes: {
-            ...existingAcc.rateLimitResetTimes,
-            ...acc.rateLimitResetTimes,
-          },
-          lastUsed: Math.max(existingAcc.lastUsed || 0, acc.lastUsed || 0),
-        });
-      } else {
-        accountMap.set(acc.refreshToken, acc);
-      }
+    if (!acc.refreshToken || isRetired(acc)) continue;
+    let index = indexByToken.get(acc.refreshToken);
+    if (index === undefined && acc.email) {
+      // The same Google account under another token (re-authentication): take over its slot when
+      // the stored token is retired or older; otherwise the email dedupe below keeps the newer one.
+      const sameEmail = indexByEmail.get(acc.email);
+      const stored = sameEmail === undefined ? undefined : merged[sameEmail];
+      if (stored && (isRetired(stored) || (acc.lastUsed || 0) >= (stored.lastUsed || 0))) index = sameEmail;
     }
+
+    if (index === undefined) {
+      indexByToken.set(acc.refreshToken, merged.length);
+      if (acc.email) indexByEmail.set(acc.email, merged.length);
+      merged.push(acc);
+      continue;
+    }
+
+    const existingAcc = merged[index]!;
+    merged[index] = {
+      ...existingAcc,
+      ...acc,
+      // Preserve manually configured projectId/managedProjectId if not in incoming
+      projectId: acc.projectId ?? existingAcc.projectId,
+      managedProjectId: acc.managedProjectId ?? existingAcc.managedProjectId,
+      rateLimitResetTimes: {
+        ...existingAcc.rateLimitResetTimes,
+        ...acc.rateLimitResetTimes,
+      },
+      lastUsed: Math.max(existingAcc.lastUsed || 0, acc.lastUsed || 0),
+    };
+    indexByToken.set(acc.refreshToken, index);
   }
 
   return {
     version: 4,
-    accounts: Array.from(accountMap.values()),
+    // Same Google account under two tokens (one replaced but not retired): keep the newest.
+    accounts: deduplicateAccountsByEmail(merged.filter((acc) => !isRetired(acc))),
     activeIndex: incoming.activeIndex,
     activeIndexByFamily: incoming.activeIndexByFamily,
+    ...(retired.length > 0 ? { retiredTokenHashes: retired } : {}),
   };
 }
 
@@ -658,8 +703,9 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
       },
     );
 
-    // Deduplicate accounts by email (keeps newest entry for each email)
-    const deduplicatedAccounts = deduplicateAccountsByEmail(validAccounts);
+    // Drop retired tokens, then deduplicate by email (keeps newest entry for each email)
+    const retiredTokenHashes = Array.isArray(storage.retiredTokenHashes) ? storage.retiredTokenHashes : [];
+    const deduplicatedAccounts = deduplicateAccountsByEmail(withoutRetired(validAccounts, retiredTokenHashes));
 
     // Clamp activeIndex to valid range after deduplication
     let activeIndex =
@@ -679,6 +725,7 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
       accounts: deduplicatedAccounts,
       activeIndex,
       activeIndexByFamily: storage.activeIndexByFamily,
+      ...(retiredTokenHashes.length > 0 ? { retiredTokenHashes } : {}),
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -690,7 +737,14 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
   }
 }
 
-export async function saveAccounts(storage: AccountStorageV4): Promise<void> {
+/**
+ * Merges `storage` into the file. `options.unretireTokens` lifts the retirement of tokens a
+ * sign-in just wrote (in case Google hands back a token that was retired before).
+ */
+export async function saveAccounts(
+  storage: AccountStorageV4,
+  options: { unretireTokens?: readonly string[] } = {},
+): Promise<void> {
   const path = getStoragePath();
   const configDir = dirname(path);
   await fs.mkdir(configDir, { recursive: true });
@@ -698,7 +752,8 @@ export async function saveAccounts(storage: AccountStorageV4): Promise<void> {
 
   await withFileLock(path, async () => {
     const existing = await loadAccountsUnsafe();
-    const merged = existing ? mergeAccountStorage(existing, storage) : storage;
+    const unretired = (options.unretireTokens ?? []).map(hashRefreshToken);
+    const merged = existing ? mergeAccountStorage(existing, storage, unretired) : storage;
 
     const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
     const content = JSON.stringify(merged, null, 2);
@@ -730,6 +785,14 @@ export async function saveAccountsReplace(storage: AccountStorageV4): Promise<vo
   await ensureGitignore(configDir);
 
   await withFileLock(path, async () => {
+    // Keep the retired-token list across replacing writes, and never write a retired token back.
+    const existing = await loadAccountsUnsafe();
+    const retired = mergeRetired(existing?.retiredTokenHashes, storage.retiredTokenHashes);
+    storage = {
+      ...storage,
+      accounts: withoutRetired(storage.accounts, retired),
+      ...(retired.length > 0 ? { retiredTokenHashes: retired } : {}),
+    };
     const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
     const content = JSON.stringify(storage, null, 2);
 
@@ -744,6 +807,20 @@ export async function saveAccountsReplace(storage: AccountStorageV4): Promise<vo
       }
       throw error;
     }
+  });
+}
+
+/**
+ * Retires refresh tokens (replaced or removed accounts): their accounts are dropped from the
+ * pool now, and merges from account managers that still hold them can't bring them back.
+ */
+export async function retireRefreshTokens(refreshTokens: readonly string[]): Promise<void> {
+  if (refreshTokens.length === 0) return;
+  const storage = await loadAccounts();
+  if (!storage) return;
+  await saveAccountsReplace({
+    ...storage,
+    retiredTokenHashes: mergeRetired(storage.retiredTokenHashes, refreshTokens.map(hashRefreshToken)),
   });
 }
 
@@ -766,9 +843,10 @@ async function loadAccountsUnsafe(): Promise<AccountStorageV4 | null> {
       return migrateV3ToV4(parsed);
     }
 
+    const retiredTokenHashes: string[] = Array.isArray(parsed.retiredTokenHashes) ? parsed.retiredTokenHashes : [];
     return {
       ...parsed,
-      accounts: deduplicateAccountsByEmail(parsed.accounts),
+      accounts: deduplicateAccountsByEmail(withoutRetired(parsed.accounts, retiredTokenHashes)),
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

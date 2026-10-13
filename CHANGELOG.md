@@ -28,6 +28,7 @@
 - Models from Antigravity's list no longer fall back to the Gemini CLI quota. Accounts without a Gemini CLI license turned a temporary 429 into a 403 "no valid license" error.
 - With quota fallback off, hybrid account selection treated a rate-limited Gemini account as available (its unused Gemini CLI pool looked free). The rotation loop then spun without awaiting and froze OpenCode's background service. Selection now checks only the pool in use.
 - Removing an account saves the pool with a replacing write; the merging save brought removed accounts back.
+- Re-authenticating or removing an account no longer leaves stale copies behind. Account managers still holding the old refresh token (an earlier request pipeline, or another opencode location) merged it back as a second entry for the same email. Replaced and removed tokens are now retired (`retiredTokenHashes`, SHA-256 fingerprints only), saves skip them and collapse same-email entries in place, and existing duplicates are cleaned up on the next save.
 
 ### Not yet on OpenCode 2
 
