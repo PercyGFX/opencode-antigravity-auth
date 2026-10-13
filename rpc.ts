@@ -63,6 +63,39 @@ export const AntigravityRpc = Rpc.define({
       output: z.object({ remaining: z.number() }),
       errors: ActionErrors,
     },
+    /**
+     * Starts a sign-in the plugin runs itself (re-authenticate / add account): it updates the
+     * account pool without adding another opencode login. `email` preselects that account.
+     */
+    signInStart: {
+      input: z.object({ email: z.string().optional() }),
+      output: z.object({
+        attemptID: z.string(),
+        mode: z.enum(["auto", "code"]),
+        url: z.string(),
+        instructions: z.string(),
+      }),
+      errors: ActionErrors,
+    },
+    /** Progress of a browser sign-in ("auto" mode). */
+    signInStatus: {
+      input: z.object({ attemptID: z.string() }),
+      output: z.object({
+        status: z.enum(["pending", "complete", "failed", "expired"]),
+        message: z.string().optional(),
+        email: z.string().optional(),
+      }),
+    },
+    /** Finishes a paste sign-in ("code" mode) with the redirect URL or code. */
+    signInComplete: {
+      input: z.object({ attemptID: z.string(), code: z.string() }),
+      output: z.object({ email: z.string().optional() }),
+      errors: ActionErrors,
+    },
+    signInCancel: {
+      input: z.object({ attemptID: z.string() }),
+      output: z.object({}),
+    },
   },
   events: {},
 });

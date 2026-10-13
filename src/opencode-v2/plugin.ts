@@ -31,6 +31,7 @@ import { createV2ClientShim } from "./client-shim";
 import { copyToClipboard } from "./clipboard";
 import { ProxyRequestError, startLoopbackProxy } from "./proxy";
 import { createQuotaReporter } from "./quota";
+import { createSignInAttempts } from "./sign-in-attempts";
 
 const log = createLogger("opencode-v2");
 
@@ -42,7 +43,7 @@ const LOGIN_HINT = `Run \`opencode auth login ${ANTIGRAVITY_INTEGRATION_ID}\` to
 const MODEL_DISCOVERY_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** OpenCode drops an unfinished sign-in after 10 minutes; give up on the browser well before. */
-const BROWSER_CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+const BROWSER_CALLBACK_TIMEOUT_MS = 9 * 60 * 1000;
 
 type PipelineFetch = LoaderResult["fetch"];
 
@@ -76,6 +77,14 @@ export function buildPasteSignInInstructions(copied: boolean, reason?: string): 
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Adds Google's `login_hint`, so the sign-in page preselects that account. */
+export function withLoginHint(url: string, loginHint: string | undefined): string {
+  if (!loginHint) return url;
+  const parsed = new URL(url);
+  parsed.searchParams.set("login_hint", loginHint);
+  return parsed.toString();
 }
 
 function hasFetch(result: LoaderResult | Record<string, unknown>): result is LoaderResult {
@@ -220,13 +229,14 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
         });
       };
 
-      const pasteAuthorization = async (methodID: string, reason?: string) => {
+      const pasteAuthorization = async (methodID: string, reason?: string, loginHint?: string) => {
         const authorization = await authorizeAntigravity("");
         const fallbackState = getStateFromAuthorizationUrl(authorization.url);
-        const copied = await copyToClipboard(authorization.url);
+        const url = withLoginHint(authorization.url, loginHint);
+        const copied = await copyToClipboard(url);
         return {
           mode: "code" as const,
-          url: authorization.url,
+          url,
           instructions: buildPasteSignInInstructions(copied, reason),
           callback: async (pasted: string) => {
             const params = parseOAuthCallbackInput(pasted, fallbackState);
@@ -245,11 +255,12 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
         await current?.close().catch(() => {});
       };
 
-      const browserAuthorization = async () => {
+      const browserAuthorization = async (loginHint?: string) => {
         if (shouldSkipLocalServer()) {
           return pasteAuthorization(
             ANTIGRAVITY_METHOD_ID,
             "This looks like a remote or WSL session, so the redirect cannot reach a local page.",
+            loginHint,
           );
         }
 
@@ -262,6 +273,7 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
           return pasteAuthorization(
             ANTIGRAVITY_METHOD_ID,
             "Port 51121 is busy, so the browser cannot report back on its own.",
+            loginHint,
           );
         }
         listener = current;
@@ -273,7 +285,9 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
           await closeListener();
           throw error;
         }
-        const copied = await copyToClipboard(authorization.url);
+        const url = withLoginHint(authorization.url, loginHint);
+        const fallbackState = getStateFromAuthorizationUrl(authorization.url);
+        const copied = await copyToClipboard(url);
 
         const callback = (async () => {
           try {
@@ -294,9 +308,19 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
 
         return {
           mode: "auto" as const,
-          url: authorization.url,
+          url,
           instructions: buildBrowserSignInInstructions(copied),
           callback,
+          /**
+           * Fallback when the callback page could not be reached (plugin reloaded, timeout,
+           * browser on another machine): finish with the URL the browser ended up on.
+           */
+          paste: async (pasted: string) => {
+            const params = parseOAuthCallbackInput(pasted, fallbackState);
+            if ("error" in params) throw new Error(params.error);
+            if (listener === current) await closeListener();
+            return finishSignIn(params.code, params.state, ANTIGRAVITY_METHOD_ID);
+          },
         };
       };
 
@@ -329,7 +353,7 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
         editor.method.update({
           integrationID: ANTIGRAVITY_INTEGRATION_ID,
           method: { id: ANTIGRAVITY_METHOD_ID, type: "oauth", label: "Google account (Antigravity)" },
-          authorize: browserAuthorization,
+          authorize: () => browserAuthorization(),
           refresh,
           label,
         });
@@ -352,6 +376,12 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
 
       // Per-account quota and account actions for the TUI sidebar (tui.tsx).
       const quota = createQuotaReporter(client, ANTIGRAVITY_PROVIDER_ID);
+      const signIns = createSignInAttempts({
+        start: (loginHint) => browserAuthorization(loginHint),
+        emailOf: (credential: Credential.OAuth) => label(credential),
+        onComplete: () => quota.invalidate(),
+        onCancel: () => closeListener(),
+      });
       await ctx.rpc.register(AntigravityRpc, {
         quota: async (input) => quota.snapshot(input.refresh === true),
         setAccountEnabled: async (input, call) => {
@@ -372,6 +402,32 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
           }
           quota.invalidate();
           return { remaining };
+        },
+        signInStart: async (input, call) => {
+          try {
+            return await signIns.start(input.email);
+          } catch (error) {
+            return call.error("failed", errorMessage(error), {});
+          }
+        },
+        signInStatus: async (input) => {
+          const status = signIns.status(input.attemptID);
+          return status.status === "failed"
+            ? { status: "failed" as const, message: status.message }
+            : status.status === "complete"
+              ? { status: "complete" as const, ...(status.email ? { email: status.email } : {}) }
+              : { status: status.status };
+        },
+        signInComplete: async (input, call) => {
+          try {
+            return await signIns.complete(input.attemptID, input.code);
+          } catch (error) {
+            return call.error("failed", errorMessage(error), {});
+          }
+        },
+        signInCancel: async (input) => {
+          await signIns.cancel(input.attemptID);
+          return {};
         },
       });
       void refreshModelsIfStale().catch(() => {});

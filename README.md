@@ -1,8 +1,5 @@
-# Antigravity + Gemini CLI OAuth Plugin for Opencode
+# Antigravity + Gemini CLI OAuth Plugin for Opencode (OpenCode 2 supported)
 
-[![npm version](https://img.shields.io/npm/v/opencode-antigravity-auth.svg)](https://www.npmjs.com/package/opencode-antigravity-auth)
-[![npm beta](https://img.shields.io/npm/v/opencode-antigravity-auth/beta.svg?label=beta)](https://www.npmjs.com/package/opencode-antigravity-auth)
-[![npm downloads](https://img.shields.io/npm/dw/opencode-antigravity-auth.svg)](https://www.npmjs.com/package/opencode-antigravity-auth)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![X (Twitter)](https://img.shields.io/badge/X-@dopesalmon-000000?style=flat&logo=x)](https://x.com/dopesalmon)
 
@@ -334,9 +331,9 @@ Antigravity · limits
 - **In use** — the account currently serving the selected model's group is bold and marked *in use*; the other accounts show which group they serve.
 - **Manage** — click an account, or run `/antigravity` (also in the command palette as *Antigravity accounts*):
   - **Disable / Enable** — take the account out of rotation or put it back
-  - **Re-authenticate** — opens *Connect an integration*; sign in with the same Google account and its entry is updated
+  - **Re-authenticate** — shows the sign-in link right away (also copied to your clipboard), with that Google account preselected. Sign in and the dialog closes by itself; if the browser says the page can't be reached, paste that page's URL into the dialog instead. Only the plugin's account is updated, so no extra opencode login is created.
   - **Remove** — removes the account from the plugin (asks first)
-  - **Add account** (in `/antigravity`) — opens *Connect an integration* to sign in with another Google account
+  - **Add account** (in `/antigravity`) — the same sign-in dialog, for another Google account. Your very first account goes through `/connect` instead, which creates opencode's Antigravity login.
 
 The limits refresh every 2 minutes and after each response. `opencode auth logout google-antigravity` signs out of opencode's Antigravity login; after removing your last account, use it to sign out completely.
 

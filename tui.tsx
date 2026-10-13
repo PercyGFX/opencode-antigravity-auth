@@ -70,6 +70,75 @@ export default Plugin.define({
 
     const connect = () => context.keymap.dispatch(CONNECT_COMMAND);
 
+    /**
+     * Re-authenticates `email` (Google preselects it) or adds an account. The plugin runs the
+     * sign-in itself, so it updates the account pool without another opencode login.
+     */
+    const signIn = async (email?: string) => {
+      let attempt: Awaited<ReturnType<typeof rpc.signInStart>>;
+      try {
+        attempt = await rpc.signInStart(email ? { email } : {});
+      } catch (error) {
+        toastError(error);
+        return;
+      }
+      const title = email ? `Re-authenticate ${email}` : "Add an Antigravity account";
+      const cancel = () => void rpc.signInCancel({ attemptID: attempt.attemptID }).catch(() => {});
+      const finished = (signedIn: string | undefined) => {
+        if (email && signedIn && signedIn.toLowerCase() !== email.toLowerCase()) {
+          context.ui.toast.show({
+            message: `Signed in as ${signedIn}; it was added as another account (${email} is unchanged)`,
+            variant: "warning",
+          });
+        } else {
+          context.ui.toast.show({ message: `${signedIn ?? "Account"} signed in`, variant: "success" });
+        }
+        void refresh(true);
+      };
+
+      // One prompt for both modes. In browser mode it also closes by itself once the browser
+      // reaches the callback page; pasting is the fallback when the page can't be reached.
+      let done = false;
+      const timer = setInterval(() => {
+        if (attempt.mode !== "auto") return;
+        void rpc
+          .signInStatus({ attemptID: attempt.attemptID })
+          .then((result) => {
+            if (done || result.status === "pending") return;
+            done = true;
+            clearInterval(timer);
+            context.ui.dialog.clear();
+            if (result.status === "complete") finished(result.email);
+            else
+              context.ui.toast.show({
+                message: result.status === "failed" ? (result.message ?? "Sign-in failed") : "Sign-in expired; start it again",
+                variant: "error",
+              });
+          })
+          .catch(() => {});
+      }, 1000);
+      const pasted = await context.ui.dialog.prompt({
+        title,
+        description:
+          attempt.mode === "auto"
+            ? `${attempt.instructions}\n\n${attempt.url}\n\nThis closes by itself once you finish. If the browser says the page can't be reached, paste that page's full URL here.`
+            : `${attempt.instructions}\n\n${attempt.url}`,
+        placeholder: attempt.mode === "auto" ? "…or paste the redirect URL" : "Redirect URL or code",
+      });
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      if (!pasted) {
+        cancel();
+        return;
+      }
+      try {
+        finished((await rpc.signInComplete({ attemptID: attempt.attemptID, code: pasted })).email);
+      } catch (error) {
+        toastError(error);
+      }
+    };
+
     const manage = async (account: QuotaAccount) => {
       const action = await context.ui.dialog.select<AccountAction>({
         title: account.email,
@@ -82,7 +151,7 @@ export default Plugin.define({
           {
             title: "Re-authenticate",
             value: "reauth",
-            description: "Sign in again with this Google account (Connect an integration → Google Antigravity)",
+            description: "Sign in again with this Google account (shows the sign-in link)",
           },
           { title: "Remove", value: "remove", description: "Remove this account from the plugin" },
         ],
@@ -96,7 +165,7 @@ export default Plugin.define({
           });
           await refresh(true);
         } else if (action === "reauth") {
-          connect();
+          await signIn(account.email);
         } else if (action === "remove") {
           const confirmed = await context.ui.dialog.confirm({
             title: `Remove ${account.email}?`,
@@ -138,7 +207,11 @@ export default Plugin.define({
           { title: "Add account", value: "add", description: "Sign in with another Google account" },
         ],
       });
-      if (choice === "add") connect();
+      // The first account must go through /connect, which creates opencode's login.
+      if (choice === "add") {
+        if (accounts.length > 0) await signIn();
+        else connect();
+      }
       else if (choice) await manage(choice);
     };
 

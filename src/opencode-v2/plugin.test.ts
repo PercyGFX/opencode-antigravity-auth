@@ -365,7 +365,7 @@ describe("browser sign-in (v1 callback page)", () => {
     expect(authorization.url).toContain("accounts.google.com");
     expect(authorization.instructions).toContain("All set!");
     expect(authorization.instructions).toContain("copied to your clipboard");
-    expect(mocks.startOAuthListener).toHaveBeenCalledWith({ timeoutMs: 5 * 60 * 1000 });
+    expect(mocks.startOAuthListener).toHaveBeenCalledWith({ timeoutMs: 9 * 60 * 1000 });
 
     const credential = await (authorization as AutoAuthorization).callback;
     expect(mocks.exchangeAntigravity).toHaveBeenCalledWith("cb-code", "cb-state");
@@ -504,5 +504,78 @@ describe("quota RPC", () => {
     expect(mocks.quotaReporter).toHaveBeenLastCalledWith(false);
     await handlers.quota!({ refresh: true });
     expect(mocks.quotaReporter).toHaveBeenLastCalledWith(true);
+  });
+});
+
+describe("plugin-run sign-in (re-authenticate from the TUI)", () => {
+  it("preselects the account with login_hint and completes through the browser page", async () => {
+    const listener = {
+      waitForCallback: vi.fn(async () => new URL("http://localhost:51121/oauth-callback?code=c&state=s")),
+      close: vi.fn(async () => {}),
+    };
+    mocks.startOAuthListener.mockResolvedValueOnce(listener);
+    mocks.exchangeAntigravity.mockResolvedValueOnce({
+      type: "success",
+      refresh: "r|p",
+      access: "a",
+      expires: 1,
+      email: "kelum@gmail.com",
+      projectId: "p",
+    });
+    const { rpcRegister } = await track();
+    const handlers = rpcRegister.mock.calls[0]![1] as Record<string, (input: unknown, call?: unknown) => Promise<any>>;
+
+    const attempt = await handlers.signInStart!({ email: "kelum@gmail.com" });
+    expect(attempt.mode).toBe("auto");
+    expect(new URL(attempt.url).searchParams.get("login_hint")).toBe("kelum@gmail.com");
+    expect(mocks.copyToClipboard).toHaveBeenCalledWith(attempt.url);
+
+    await settle();
+    await expect(handlers.signInStatus!({ attemptID: attempt.attemptID })).resolves.toEqual({
+      status: "complete",
+      email: "kelum@gmail.com",
+    });
+    expect(mocks.persistAccountPool).toHaveBeenCalled();
+    expect(mocks.quotaInvalidate).toHaveBeenCalled();
+  });
+});
+
+describe("withLoginHint", () => {
+  it("adds Google's login_hint only when an email is given", async () => {
+    const { withLoginHint } = await import("./plugin");
+    expect(new URL(withLoginHint("https://accounts.google.com/o?a=1", "me@gmail.com")).searchParams.get("login_hint")).toBe(
+      "me@gmail.com",
+    );
+    expect(withLoginHint("https://accounts.google.com/o?a=1", undefined)).toBe("https://accounts.google.com/o?a=1");
+  });
+});
+
+describe("browser sign-in fallback", () => {
+  it("accepts the pasted redirect URL when the callback page couldn't be reached", async () => {
+    const listener = {
+      waitForCallback: vi.fn(() => new Promise<URL>(() => {})),
+      close: vi.fn(async () => {}),
+    };
+    mocks.startOAuthListener.mockResolvedValueOnce(listener);
+    mocks.exchangeAntigravity.mockResolvedValueOnce({
+      type: "success",
+      refresh: "r|p",
+      access: "a",
+      expires: 1,
+      email: "kelum@gmail.com",
+      projectId: "p",
+    });
+    const { rpcRegister } = await track();
+    const handlers = rpcRegister.mock.calls[0]![1] as Record<string, (input: unknown, call?: unknown) => Promise<any>>;
+
+    const attempt = await handlers.signInStart!({ email: "kelum@gmail.com" });
+    await expect(
+      handlers.signInComplete!(
+        { attemptID: attempt.attemptID, code: "http://localhost:51121/oauth-callback?code=c&state=STATE123" },
+        { error: vi.fn() },
+      ),
+    ).resolves.toEqual({ email: "kelum@gmail.com" });
+    expect(mocks.exchangeAntigravity).toHaveBeenCalledWith("c", "STATE123");
+    expect(listener.close).toHaveBeenCalled();
   });
 });
