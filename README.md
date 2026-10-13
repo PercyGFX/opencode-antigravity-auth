@@ -6,7 +6,7 @@
 Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access models like `gemini-3.1-pro` and `claude-opus-4-6-thinking` with your Google credentials.
 
 > [!NOTE]
-> **OpenCode 2.x support.** This fork ([PercyGFX/opencode-antigravity-auth](https://github.com/PercyGFX/opencode-antigravity-auth)) adds an OpenCode 2 entry point (`server.ts`). OpenCode 2 ignores plugins written for 1.x. The tell-tale sign is that `opencode auth login google` only offers an API key. OpenCode 1.x keeps loading the original entry point unchanged, see [OpenCode 1.x](#opencode-1x).
+> **OpenCode 2.x support.** This fork ([PercyGFX/opencode-antigravity-auth](https://github.com/PercyGFX/opencode-antigravity-auth)) adds an OpenCode 2 entry point (`server.ts`), published on npm as [`@percygfx/opencode-antigravity-auth`](https://www.npmjs.com/package/@percygfx/opencode-antigravity-auth). OpenCode 2 ignores plugins written for 1.x. The tell-tale sign is that `opencode auth login google` only offers an API key. OpenCode 1.x keeps loading the original entry point unchanged, see [OpenCode 1.x](#opencode-1x).
 
 ## What You Get
 
@@ -43,6 +43,14 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 
 These steps are for **OpenCode 2.x**. Check your version with `opencode --version`. For 1.x, see [OpenCode 1.x](#opencode-1x).
 
+### Quick Start
+
+```bash
+opencode plugin add @percygfx/opencode-antigravity-auth
+```
+
+Then open `opencode`, run `/antigravity` → **Add account**, and sign in with Google. The models appear in the model picker under **Google Antigravity**, and the sidebar shows your 5-hour and weekly limits. The steps below explain each part.
+
 <details open>
 <summary><b>For Humans</b></summary>
 
@@ -62,13 +70,14 @@ Install the OpenCode 2 build of the opencode-antigravity-auth plugin by followin
    opencode plugin add @percygfx/opencode-antigravity-auth
    ```
 
-   OpenCode downloads the package and adds it to the `plugins` list in `~/.config/opencode/opencode.json`. There is no need for `npm install -g`: OpenCode keeps its own copy and checks for new versions by itself. Run `opencode plugin update` to update right away.
+   OpenCode downloads the package and adds it to the `plugins` list in `~/.config/opencode/opencode.json`. There is no need for `npm install -g`: OpenCode keeps its own copy and checks for new versions by itself.
 
-2. **Check it loaded:** `opencode plugin list` should list `opencode-antigravity-auth`. Right after the background service starts, the list can take a few seconds to fill in.
+2. **Check it loaded:** `opencode plugin list` should list `opencode-antigravity-auth`. Right after the background service starts, the list can take a few seconds to fill in. If OpenCode was already running and the plugin is missing, restart it: `opencode service restart`.
 
    > **Upgrading from 1.x?** Remove the 1.x `opencode-antigravity-auth` entry from the `plugin` list in `opencode.json`, and remove the `provider.google.models` block that 1.x setups added. The models now come from the plugin, under the `google-antigravity` provider. The old block would only add copies under `google` that bypass the plugin.
 
-3. **Sign in** with your Google account, using either:
+3. **Sign in** with your Google account, using any of:
+   - **TUI:** run `/antigravity` → **Add account**.
    - **TUI:** run `/connect` (or choose **Connect an integration** in the model picker) → **Google Antigravity**. Sending a prompt with nothing connected opens the same dialog.
    - **CLI:** `opencode auth login google-antigravity`
 
@@ -90,10 +99,19 @@ Install the OpenCode 2 build of the opencode-antigravity-auth plugin by followin
 
    Sign in again to add more accounts. Each login is labeled with its Google email in `opencode auth list`.
 
-4. **Use it:**
+4. **Use it:** pick a model under **Google Antigravity** in the model picker, or from the CLI:
 
    ```bash
    opencode run "Hello" --model google-antigravity/antigravity-claude-opus-4-6-thinking#max
+   ```
+
+   The sidebar shows each account's 5-hour and weekly limits. Click an account there, or run `/antigravity`, to add, disable, re-authenticate or remove accounts.
+
+5. **Update or uninstall:**
+
+   ```bash
+   opencode plugin update                                       # update now (OpenCode also checks by itself)
+   opencode plugin remove @percygfx/opencode-antigravity-auth   # uninstall
    ```
 
 **Option C: From source** (to work on the plugin)
@@ -120,6 +138,8 @@ Add the **folder** to the `plugins` list in `~/.config/opencode/opencode.json`, 
    ```bash
    opencode plugin add @percygfx/opencode-antigravity-auth
    ```
+
+   Check with `opencode plugin list` (it can take a few seconds after the background service starts). If OpenCode was already running and the plugin is missing, run `opencode service restart`.
 
 3. Open the OpenCode configuration file at `~/.config/opencode/opencode.json` (or `opencode.jsonc`). If its `plugin` list still has a 1.x `opencode-antigravity-auth` entry (such as `opencode-antigravity-auth@latest`), remove that entry.
 
