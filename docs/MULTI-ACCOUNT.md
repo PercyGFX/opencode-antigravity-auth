@@ -3,8 +3,11 @@
 Add multiple Google accounts to increase your combined quota and improve availability. The plugin automatically rotates between accounts when one is rate-limited.
 
 ```bash
-opencode auth login  # Run again to add more accounts
+opencode auth login google-antigravity  # OpenCode 2: run again to add more accounts
+opencode auth login                     # OpenCode 1.x
 ```
+
+On OpenCode 2 you can also sign in from the TUI: `/connect` → **Google Antigravity**, or **Add account** in `/antigravity`. Both versions share the same accounts file, so rotation, quota pools and every setting on this page behave the same.
 
 ---
 
@@ -43,12 +46,16 @@ Automatic fallback between pools is always enabled for Gemini requests.
 
 ## Checking Quotas
 
-Check your current API usage across all accounts:
+Check your current API usage across all accounts.
+
+On OpenCode 1.x, use the login menu:
 
 ```bash
 opencode auth login
 # Select "Check quotas" from the menu
 ```
+
+On OpenCode 2 the session sidebar shows each account's quota (the **Antigravity · 5h limits** section), refreshed every 2 minutes and after each response. Antigravity reports a 5-hour window per quota group (Gemini; Claude & GPT-OSS) and no weekly limit. See [README: Accounts and limits in the TUI](../README.md#accounts-and-limits-in-the-tui-opencode-2).
 
 This shows remaining quota percentages and reset times for each model family:
 - **Claude** - Claude Opus/Sonnet quota
@@ -69,7 +76,9 @@ node scripts/check-quota.mjs --path /path/to/accounts.json  # Custom path
 
 ## Managing Accounts
 
-Enable or disable specific accounts to control which ones are used for requests:
+Enable or disable specific accounts to control which ones are used for requests.
+
+**OpenCode 1.x:**
 
 ```bash
 opencode auth login
@@ -77,6 +86,8 @@ opencode auth login
 ```
 
 Or select an account from the list and choose "Enable/Disable account".
+
+**OpenCode 2:** click the account in the sidebar, or run `/antigravity` and pick it, then choose **Disable** / **Enable**. The change applies to the running plugin immediately. The same menu has **Remove** and **Re-authenticate**. (Editing `antigravity-accounts.json` by hand still works with OpenCode stopped via `opencode service stop`; the running plugin rewrites the file.)
 
 **Disabled accounts:**
 - Are excluded from automatic rotation
@@ -103,6 +114,8 @@ When running `opencode auth login` with existing accounts:
 ```
 
 Choose `a` to add more accounts while keeping existing ones.
+
+**OpenCode 2:** every sign-in adds the account to the pool, with no prompt. Signing in again with an account that is already in the pool updates that entry (matched by email). To start fresh, delete `antigravity-accounts.json` and run `opencode auth logout google-antigravity` before signing in.
 
 ---
 
@@ -157,6 +170,12 @@ To manually reset:
 
 ```bash
 rm ~/.config/opencode/antigravity-accounts.json
+
+# OpenCode 2
+opencode auth logout google-antigravity
+opencode auth login google-antigravity
+
+# OpenCode 1.x
 opencode auth login
 ```
 
@@ -176,7 +195,9 @@ When using oh-my-opencode with parallel subagents, multiple processes may select
 
 This distributes sessions across accounts based on process ID.
 
-Alternatively, add more accounts via `opencode auth login`.
+Alternatively, add more accounts via `opencode auth login` (`opencode auth login google-antigravity` on OpenCode 2).
+
+> **OpenCode 2:** every session goes through the single background service, so all of them share one plugin instance and one view of account state. PID-based offset therefore cannot spread sessions out, and parallel subagents rotate through the shared pool instead.
 
 ---
 

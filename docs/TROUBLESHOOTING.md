@@ -2,7 +2,7 @@
 
 Solutions to common issues with the Antigravity Auth plugin.
 
-> **Quick Reset**: Most issues can be resolved by deleting `~/.config/opencode/antigravity-accounts.json` and running `opencode auth login` again.
+> **Quick Reset**: Most issues can be resolved by deleting `~/.config/opencode/antigravity-accounts.json` and signing in again. On OpenCode 2, run `opencode auth logout google-antigravity`, then `opencode auth login google-antigravity`. On 1.x, run `opencode auth login`.
 
 ---
 
@@ -12,12 +12,64 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 
 | File | Path |
 |------|------|
-| Main config | `~/.config/opencode/opencode.json` |
+| Main config | `~/.config/opencode/opencode.json` (or `opencode.jsonc`) |
 | Accounts | `~/.config/opencode/antigravity-accounts.json` |
 | Plugin config | `~/.config/opencode/antigravity.json` |
 | Debug logs | `~/.config/opencode/antigravity-logs/` |
+| OpenCode 2 server log | `~/.local/share/opencode/log/opencode.log` |
 
 > **Windows users**: `~` resolves to your user home directory (e.g., `C:\Users\YourName`). Do NOT use `%APPDATA%`.
+
+---
+
+## OpenCode 2
+
+### Login only offers "Google API key"
+
+A 1.x build of the plugin is installed. OpenCode 2 does not run 1.x plugins, so only OpenCode's built-in API-key method appears on the `google` integration. Install the OpenCode 2 build (see the [README](../README.md#installation)) and sign in under **`google-antigravity`**:
+
+```bash
+opencode auth login google-antigravity
+```
+
+### Plugin not loading
+
+1. `opencode plugin list` should list `opencode-antigravity-auth` with its `server.ts` path.
+2. The `plugin` entry must be the plugin **folder**. A path to a single `.js` file is skipped with `configured plugin path must be a directory` in the server log.
+3. `Plugin must export a default definition with an id and an effect or setup function` means a 1.x build is installed. Use the `opencode-v2` branch.
+4. After changing the plugin's files, run `opencode service restart`.
+
+### "Not signed in to Google Antigravity" / no `google-antigravity` models
+
+The provider only appears once OpenCode has a `google-antigravity` connection. Sign in with `opencode auth login google-antigravity`, or from the TUI: `/connect` → **Google Antigravity**. If it worked before and stopped, the stored token could not be refreshed, so sign in again.
+
+### The CLI opens my default browser
+
+`opencode auth login` opens the sign-in link by itself whenever it runs in a terminal. That is OpenCode's own behaviour, so the plugin cannot turn it off. Use the TUI dialog instead: it only shows the link, and the plugin copies it to your clipboard (press `c` to copy it again). Either way you can ignore the opened tab and open the link in the browser you want. With the default method, the "All set!" page finishes the sign-in. With the paste method, paste the redirected `localhost:51121` URL back.
+
+### A model is missing, or a new one doesn't show up
+
+The model list follows Antigravity's Recommended list and refreshes after each sign-in and every 6 hours. Run `node scripts/list-models.mjs` (`--account 2`, `--all`) to see what Antigravity offers your accounts. Models outside the Recommended list are not added.
+
+### "Not available on your current plan" / no Sonnet or Opus 5.5
+
+Antigravity decides which models each account gets. An account with a Google AI Pro subscription can still be enrolled in Antigravity's free tier, and then gets the free-tier models and limits. Models appear automatically once Antigravity offers them to a signed-in account.
+
+### 403 "You do not have a valid license of this product"
+
+That is the Gemini CLI quota, which many accounts cannot use. Models from Antigravity's list no longer fall back to it; older Gemini names requested directly still can. See the [README](../README.md#403-you-do-not-have-a-valid-license-of-this-product).
+
+### `RESOURCE_EXHAUSTED` on one model while others work
+
+Antigravity can run out of quota for a model group (e.g. Gemini 3.1 Pro) while the sidebar still shows quota left for the group. Switch to another model (Gemini 3.8 Flash) or wait for the reset time shown in the sidebar.
+
+### Managing accounts
+
+Click an account in the sidebar, or run `/antigravity`: **Disable / Enable**, **Re-authenticate** (opens `/connect`), **Remove**, and **Add account**. Removing your last account leaves OpenCode's own login; run `opencode auth logout google-antigravity` to sign out completely.
+
+### Toasts, session recovery, `google_search` missing
+
+These are not available in the OpenCode 2 build yet. See [Architecture: Not Yet Ported](ARCHITECTURE.md#not-yet-ported).
 
 ---
 
@@ -27,11 +79,19 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 Delete the accounts file and re-authenticate:
 ```bash
 rm ~/.config/opencode/antigravity-accounts.json
+
+# OpenCode 2
+opencode auth logout google-antigravity
+opencode auth login google-antigravity
+
+# OpenCode 1.x
 opencode auth login
 ```
 
 ### "This version of Antigravity is no longer supported"
 This almost always means an outdated Antigravity `User-Agent` is still being used.
+
+> **OpenCode 2:** update your clone (`git pull`), stop the background service with `opencode service stop`, delete `antigravity-accounts.json`, and sign in again with `opencode auth login google-antigravity`. The cache paths below only apply to npm installs on 1.x.
 
 1) Stop any running OpenCode processes (stale processes can overwrite your accounts file):
 
@@ -64,7 +124,9 @@ opencode auth login
 ```
 
 ### "Model not found"
-Add this to your `google` provider config:
+**OpenCode 2:** use `google-antigravity/<model>` (e.g. `google-antigravity/antigravity-gemini-3-flash`). The models are listed only after you sign in.
+
+**OpenCode 1.x:** add this to your `google` provider config:
 ```json
 "npm": "@ai-sdk/google"
 ```
@@ -74,7 +136,7 @@ Type `continue` to trigger auto-recovery, or use `/undo` to roll back.
 
 ### Configuration Key Typo
 
-The correct key is `plugin` (singular):
+On OpenCode 1.x the correct key is `plugin` (singular):
 
 ```json
 {
@@ -82,7 +144,7 @@ The correct key is `plugin` (singular):
 }
 ```
 
-**Not** `"plugins"` (will cause "Unrecognized key" error).
+**Not** `"plugins"` (will cause "Unrecognized key" error). OpenCode 2 accepts both keys.
 
 ### "Invalid SemVer: beta"
 
@@ -163,14 +225,14 @@ Invalid JSON payload received. Unknown name "parameters" at 'request.tools[0]'
 - Plugin version regression
 
 **Solutions:**
-1. **Update to latest beta:**
+1. **Update the plugin.** On OpenCode 2, run `git pull` in your clone, then `opencode service restart`. On 1.x, use the latest beta:
    ```json
    { "plugin": ["opencode-antigravity-auth@beta"] }
    ```
 
 2. **Disable MCP servers** one-by-one to find the problematic one
 
-3. **Add npm override:**
+3. **Add npm override** (OpenCode 1.x only; OpenCode 2 always uses its own Gemini client):
    ```json
    { "provider": { "google": { "npm": "@ai-sdk/google" } } }
    ```
@@ -254,8 +316,8 @@ If you only have one account, you'll likely have a better experience using [Anti
 
 If adding new accounts:
 1. Delete accounts file: `rm ~/.config/opencode/antigravity-accounts.json`
-2. Re-authenticate: `opencode auth login`
-3. Update to latest beta: `"plugin": ["opencode-antigravity-auth@beta"]`
+2. Re-authenticate: `opencode auth login google-antigravity` (OpenCode 2) or `opencode auth login` (1.x)
+3. Update to the latest plugin: `git pull` in your clone (OpenCode 2), or `"plugin": ["opencode-antigravity-auth@beta"]` (1.x)
 4. Consider "warming up" the account in Antigravity IDE first
 
 </details>
@@ -279,6 +341,10 @@ If you're seeing unusual rate limit behavior, please share in a [GitHub issue](h
 3. Add more accounts or wait for rate limit to expire
 
 ---
+
+## Sign-in Callback Problems
+
+> **OpenCode 2:** the default method, **Google account (Antigravity)**, uses the same `localhost:51121` callback page as 1.x. If the browser cannot reach it (Safari HTTPS-Only Mode, a busy port, WSL2/Docker/SSH), choose **Google account (Antigravity, paste the redirect URL)** instead. It has no local server: copy the redirected `localhost:51121` URL from the address bar and paste it back. Any browser on any machine works, and a rewritten `https://localhost...` URL is fine, because only its `code` and `state` values are used. The default method also falls back to pasting when the port is busy or in WSL/remote sessions. The sections below describe the callback page itself.
 
 ## Safari OAuth Callback Fails (macOS)
 
@@ -359,13 +425,16 @@ ssh -L 51121:localhost:51121 user@remote
 ## Migrating Accounts Between Machines
 
 When copying `antigravity-accounts.json` to a new machine:
-1. Ensure the plugin is installed: `"plugin": ["opencode-antigravity-auth@beta"]`
+1. Ensure the plugin is installed: the plugin folder on OpenCode 2, or `"plugin": ["opencode-antigravity-auth@beta"]` on 1.x
 2. Copy `~/.config/opencode/antigravity-accounts.json`
-3. If you get "API key missing" error, the refresh token may be invalid — re-authenticate
+3. On OpenCode 2, sign in once with `opencode auth login google-antigravity`. OpenCode keeps its own connection, separate from the accounts file, and the models only appear once that connection exists.
+4. If you get "API key missing" error, the refresh token may be invalid — re-authenticate
 
 ---
 
 ## Plugin Compatibility Issues
+
+> The plugins below are OpenCode 1.x plugins. OpenCode 2 only runs plugins that ship a 2.x build.
 
 ### @tarquinen/opencode-dcp
 
@@ -398,6 +467,13 @@ You don't need them. This plugin handles all Google OAuth.
 ---
 
 ## Migration Guides
+
+### OpenCode 1.x → 2.x
+
+1. Replace the npm plugin entry with the path to a clone of the `opencode-v2` branch. It must be a folder, not a `.js` file (see the [README](../README.md#installation)).
+2. Delete the `provider.google.models` block (`antigravity-*` and `gemini-*` entries). The plugin now registers these models under the `google-antigravity` provider.
+3. Sign in once with `opencode auth login google-antigravity`. Your existing `antigravity-accounts.json` is reused, and the new sign-in is added to it.
+4. Update model references: `google/<model>` → `google-antigravity/<model>`, and `--variant=max` → `--model google-antigravity/<model>#max`.
 
 ### v1.2.8+ (Variants)
 
@@ -448,7 +524,7 @@ Enable debug logging:
 }
 ```
 
-Logs are in `~/.config/opencode/antigravity-logs/`.
+Logs are in `~/.config/opencode/antigravity-logs/`. On OpenCode 2, `debug_tui` has no effect. Plugin load errors are in the OpenCode server log, `~/.local/share/opencode/log/opencode.log`.
 
 ---
 

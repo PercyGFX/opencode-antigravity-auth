@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
-import { OPENCODE_MODEL_DEFINITIONS } from "./models";
+import { currentOpencodeModelDefinitions } from "./models";
 
 // =============================================================================
 // Types
@@ -152,7 +152,7 @@ export async function updateOpencodeConfig(
     }
 
     // Replace google models with plugin models
-    config.provider.google.models = { ...OPENCODE_MODEL_DEFINITIONS };
+    config.provider.google.models = currentOpencodeModelDefinitions();
 
     // Ensure config directory exists
     const configDir = dirname(configPath);

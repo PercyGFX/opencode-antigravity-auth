@@ -1,3 +1,4 @@
+import { builtinRegistryModels, getRegistryModels, type RegistryModel } from "../model-registry";
 import type { ProviderModel } from "../types";
 
 export type ModelThinkingLevel = "minimal" | "low" | "medium" | "high";
@@ -32,83 +33,51 @@ export interface OpencodeModelDefinition extends ProviderModel {
 
 export type OpencodeModelDefinitions = Record<string, OpencodeModelDefinition>;
 
-const DEFAULT_MODALITIES: ModelModalities = {
-  input: ["text", "image", "pdf"],
-  output: ["text"],
+/** Thinking budgets offered as variants for Claude thinking models. */
+const CLAUDE_THINKING_VARIANTS: Record<string, ModelVariant> = {
+  low: { thinkingConfig: { thinkingBudget: 8192 } },
+  max: { thinkingConfig: { thinkingBudget: 32768 } },
 };
 
-export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
-  "antigravity-gemini-3-pro": {
-    name: "Gemini 3 Pro (Antigravity)",
-    limit: { context: 1048576, output: 65535 },
-    modalities: DEFAULT_MODALITIES,
-    variants: {
-      low: { thinkingLevel: "low" },
-      high: { thinkingLevel: "high" },
-    },
-  },
-  "antigravity-gemini-3.1-pro": {
-    name: "Gemini 3.1 Pro (Antigravity)",
-    limit: { context: 1048576, output: 65535 },
-    modalities: DEFAULT_MODALITIES,
-    variants: {
-      low: { thinkingLevel: "low" },
-      high: { thinkingLevel: "high" },
-    },
-  },
-  "antigravity-gemini-3-flash": {
-    name: "Gemini 3 Flash (Antigravity)",
-    limit: { context: 1048576, output: 65536 },
-    modalities: DEFAULT_MODALITIES,
-    variants: {
-      minimal: { thinkingLevel: "minimal" },
-      low: { thinkingLevel: "low" },
-      medium: { thinkingLevel: "medium" },
-      high: { thinkingLevel: "high" },
-    },
-  },
-  "antigravity-claude-sonnet-4-6": {
-    name: "Claude Sonnet 4.6 (Antigravity)",
-    limit: { context: 200000, output: 64000 },
-    modalities: DEFAULT_MODALITIES,
-  },
-  "antigravity-claude-opus-4-6-thinking": {
-    name: "Claude Opus 4.6 Thinking (Antigravity)",
-    limit: { context: 200000, output: 64000 },
-    modalities: DEFAULT_MODALITIES,
-    variants: {
-      low: { thinkingConfig: { thinkingBudget: 8192 } },
-      max: { thinkingConfig: { thinkingBudget: 32768 } },
-    },
-  },
-  "gemini-2.5-flash": {
-    name: "Gemini 2.5 Flash (Gemini CLI)",
-    limit: { context: 1048576, output: 65536 },
-    modalities: DEFAULT_MODALITIES,
-  },
-  "gemini-2.5-pro": {
-    name: "Gemini 2.5 Pro (Gemini CLI)",
-    limit: { context: 1048576, output: 65536 },
-    modalities: DEFAULT_MODALITIES,
-  },
-  "gemini-3-flash-preview": {
-    name: "Gemini 3 Flash Preview (Gemini CLI)",
-    limit: { context: 1048576, output: 65536 },
-    modalities: DEFAULT_MODALITIES,
-  },
-  "gemini-3-pro-preview": {
-    name: "Gemini 3 Pro Preview (Gemini CLI)",
-    limit: { context: 1048576, output: 65535 },
-    modalities: DEFAULT_MODALITIES,
-  },
-  "gemini-3.1-pro-preview": {
-    name: "Gemini 3.1 Pro Preview (Gemini CLI)",
-    limit: { context: 1048576, output: 65535 },
-    modalities: DEFAULT_MODALITIES,
-  },
-  "gemini-3.1-pro-preview-customtools": {
-    name: "Gemini 3.1 Pro Preview Custom Tools (Gemini CLI)",
-    limit: { context: 1048576, output: 65535 },
-    modalities: DEFAULT_MODALITIES,
-  },
-};
+/**
+ * Variants for a registry model: one per Antigravity tier (Low/Medium/High map to their own
+ * upstream models), or thinking budgets for Claude thinking models.
+ */
+export function registryModelVariants(model: RegistryModel): Record<string, ModelVariant> | undefined {
+  if (model.variants.length > 0) {
+    return Object.fromEntries(model.variants.map((variant) => [variant.tier, { thinkingLevel: variant.tier }]));
+  }
+  if (model.vendor === "anthropic" && model.id.includes("thinking")) {
+    return { ...CLAUDE_THINKING_VARIANTS };
+  }
+  return undefined;
+}
+
+/** Converts registry models to the opencode.json model shape, keyed by `antigravity-<id>`. */
+export function toOpencodeModelDefinitions(models: readonly RegistryModel[]): OpencodeModelDefinitions {
+  const definitions: OpencodeModelDefinitions = {};
+  for (const model of models) {
+    const variants = registryModelVariants(model);
+    definitions[`antigravity-${model.id}`] = {
+      name: `${model.name} (Antigravity)`,
+      limit: { context: model.contextLimit, output: model.outputLimit },
+      modalities: {
+        input: model.supportsImages ? ["text", "image", "pdf"] : ["text"],
+        output: ["text"],
+      },
+      ...(variants ? { variants } : {}),
+    };
+  }
+  return definitions;
+}
+
+/**
+ * The built-in model list (Antigravity's Recommended list at release time). OpenCode 2 uses the
+ * live list instead; see `currentOpencodeModelDefinitions()`.
+ */
+export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = toOpencodeModelDefinitions(builtinRegistryModels());
+
+/** The current model list: the last discovery from Antigravity, or the built-in list. */
+export function currentOpencodeModelDefinitions(): OpencodeModelDefinitions {
+  return toOpencodeModelDefinitions(getRegistryModels());
+}

@@ -1,6 +1,6 @@
 # Architecture Guide
 
-**Last Updated:** April 2026
+**Last Updated:** October 2026
 
 This document explains how the Antigravity plugin works: request/response flow, Claude-specific handling, and session recovery.
 
@@ -21,17 +21,32 @@ This document explains how the Antigravity plugin works: request/response flow, 
 
 The plugin intercepts requests to `generativelanguage.googleapis.com`, transforms them for the Antigravity API, and handles authentication, rate limits, and error recovery.
 
+The same request pipeline serves both OpenCode versions. Only the glue to OpenCode differs; see [OpenCode 2 Adapter](#opencode-2-adapter).
+
 ---
 
 ## Module Structure
 
 ```
+index.ts                     # OpenCode 1.x entry (named v1 plugin exports)
+server.ts                    # OpenCode 2 entry (default export, see below)
+tui.tsx                      # OpenCode 2 TUI plugin: sidebar limits + account management
+rpc.ts                       # RPC shared by server.ts and tui.tsx (quota, account actions)
 src/
-├── index.ts                 # Plugin exports
-├── plugin.ts                # Main entry, fetch interceptor
+├── plugin.ts                # v1 plugin: hooks + fetch interceptor (shared pipeline)
 ├── constants.ts             # Endpoints, headers, config
 ├── antigravity/
 │   └── oauth.ts             # OAuth token exchange
+├── opencode-v2/             # OpenCode 2 adapter around the shared pipeline
+│   ├── plugin.ts            # v2 setup: sign-in method, provider, proxy wiring
+│   ├── proxy.ts             # Loopback proxy feeding the v1 fetch interceptor
+│   ├── catalog.ts           # google-antigravity provider + models from the model registry
+│   ├── quota.ts             # Per-account quota snapshot for the sidebar (RPC "quota")
+│   ├── quota-format.ts      # Sidebar formatting helpers (shared with tui.tsx)
+│   ├── accounts.ts          # Enable/disable/remove accounts; pool-aware login for the loader
+│   ├── client-shim.ts       # Stand-in for the v1 SDK client (toasts, auth.set)
+│   └── clipboard.ts         # Copies the sign-in link (no browser is opened)
+│                            # (browser sign-in reuses plugin/server.ts, the 1.x callback page)
 └── plugin/
     ├── auth.ts              # Token validation & refresh
     ├── request.ts           # Request transformation (main logic)
@@ -46,6 +61,8 @@ src/
     │   ├── schema.ts        # Zod config schema
     │   └── loader.ts        # Config file loading
     ├── accounts.ts          # Multi-account management
+    ├── model-registry.ts    # Antigravity's model list -> catalog entries, upstream IDs, hub UA
+    ├── model-discovery.ts   # fetchAvailableModels with the hub and the regular User-Agent
     ├── server.ts            # OAuth callback server
     └── debug.ts             # Debug logging
 ```
@@ -132,7 +149,110 @@ Claude API requires thinking before `tool_use` blocks. The plugin:
 
 ---
 
+## OpenCode 2 Adapter
+
+OpenCode 2 replaced the 1.x plugin API, and it does not run 1.x plugins. The parts this plugin relied on changed as follows:
+
+| 1.x | 2.x |
+|-----|-----|
+| Plugin = exported functions returning hooks | Plugin = **default export** `{ id, setup(ctx) }` |
+| `auth: { provider, loader, methods }` hook | `ctx.integration.transform()` registers OAuth methods |
+| `loader` returns `{ apiKey, fetch }`; OpenCode's `@ai-sdk/google` calls that `fetch` | Google models use OpenCode's **native Gemini client**, which accepts a `baseURL` but no custom `fetch` |
+| Models from `provider.google.models` in `opencode.json` | `ctx.provider.transform()` adds providers and models |
+| `client` SDK object (toasts, `auth.set`, `session.*`) | No client for server plugins |
+| `event` hook (`session.error`, `session.created`) | Not wired by this adapter |
+
+`server.ts` default-exports `createAntigravityV2Plugin()` (`src/opencode-v2/plugin.ts`). OpenCode 2 loads a package's `./server` export, or a plugin folder's `server.*` file (run directly by Bun, so no build is needed). OpenCode 1.x keeps loading `index.ts`.
+
+### Setup
+
+```
+setup(ctx)
+ ├─ createAntigravityPlugin("google-antigravity")({ client: shim, directory })
+ │     └─ the unchanged v1 plugin; only its auth.loader (→ fetch interceptor) is used
+ ├─ startLoopbackProxy(handler)           → http://127.0.0.1:<port>/<secret>/v1beta
+ ├─ integration "google-antigravity"      → OAuth "antigravity" (browser, v1 callback page)
+ │                                           OAuth "antigravity-paste" (paste the redirect)
+ ├─ provider "google-antigravity"         → package @opencode/ai/providers/google,
+ │                                           settings.baseURL = proxy URL,
+ │                                           models from the model registry
+ ├─ model discovery                       → after sign-in and when the list is >6h old;
+ │                                           provider.reload() rebuilds the catalog
+ ├─ rpc "antigravity"                     → quota, setAccountEnabled, removeAccount (for tui.tsx)
+ └─ returns cleanup                       → closes the proxy and any waiting callback listener
+```
+
+### Request Flow Under OpenCode 2
+
+```
+OpenCode native Gemini client
+  POST http://127.0.0.1:<port>/<secret>/v1beta/models/<model>:streamGenerateContent?alt=sse
+    │   (x-goog-api-key = OpenCode's stored access token, dropped by the proxy)
+    ▼
+proxy.ts  → rebuilds https://generativelanguage.googleapis.com/v1beta/models/...
+          → body passed as a string (the pipeline only rewrites string bodies)
+    ▼
+v1 fetch interceptor (plugin.ts) — account selection, token refresh, endpoint fallback,
+                                   request/response transformation, streaming
+    ▼
+Antigravity / Gemini CLI endpoints → SSE streamed back unchanged through the proxy
+```
+
+- **Why a proxy:** the v1 interceptor owns the whole request lifecycle (retries, rotation, fallback). OpenCode 2's `http.request`/`http.response` session hooks can only rewrite a single request and response around OpenCode's own fetch. Sitting behind `baseURL` keeps the pipeline unchanged.
+- **Proxy safety:** it binds to `127.0.0.1` only, and every path must start with a random per-process secret. Other local processes therefore cannot use the signed-in accounts.
+- **Own provider, not `google`:** OpenCode 2 keeps one active connection per integration. Signing in to Antigravity on `google` would make OpenCode send the OAuth token as the API key for every Google model, so this plugin uses the separate `google-antigravity` provider and integration.
+- **Catalog IDs** keep the `antigravity-` prefix (`antigravity-gemini-3.8-flash`), so the v1 resolver treats them as explicit Antigravity models. Variants map to `settings.thinkingConfig` (`thinkingLevel` / `thinkingBudget`), which the native client sends as `generationConfig.thinkingConfig`; the request pipeline turns model + tier into the upstream ID (see [Model Registry](#model-registry)).
+
+### Model Registry
+
+`src/plugin/model-registry.ts` holds the models the plugin offers, shared by both OpenCode versions.
+
+- **Source:** `fetchAvailableModels` called with the current Antigravity client's ("hub") User-Agent. Its `agentModelSorts` "Recommended" list, in order, becomes the registry. Models outside that list (superseded or deprecated) are left out.
+- **Grouping:** entries named `<Name> (Low|Medium|High)` that share a name become one model with tier variants. Their upstream IDs need not follow a pattern (`Gemini 3.1 Pro (High)` is `gemini-pro-agent`). A name with a single tier stays a plain model (`gpt-oss-120b-medium`). Without a variant, the first-listed tier is used (Antigravity lists high first).
+- **Hub-only IDs:** discovery calls the endpoint a second time with the User-Agent normal requests use. IDs missing from that answer (Gemini 3.7/3.8 Flash tiers) are flagged, and `prepareAntigravityRequest()` sends the hub User-Agent for them (`getHubUserAgent()`).
+- **Routing:** `prepareAntigravityRequest()` keeps the logical model name for its transformation logic, but writes `resolveUpstreamModel(model, tier)` into the body's `model` field and aligns `thinkingLevel` with the chosen tier. Models the registry doesn't know keep the old name handling.
+- **No Gemini CLI fallback for registry models:** `resolveHeaderRoutingDecision()` disables quota fallback for them. Their IDs don't exist on Gemini CLI, and accounts without a Gemini CLI license would turn a 429 into a 403. Hybrid account selection honors this too (`getCurrentOrNextForFamily(..., allowQuotaFallback)`); before, it treated a Gemini account as usable while the unused Gemini CLI pool was free, so the rotation loop spun without awaiting and froze OpenCode's service.
+- **Lifecycle:** a built-in snapshot is used until the first discovery. Discoveries are cached in `~/.config/opencode/antigravity-models.json`. The v2 plugin discovers after each sign-in and whenever the list is older than 6 hours (checked at startup and on requests), then calls `ctx.provider.reload()`. All catalog models stay `active`: OpenCode's model picker hides `deprecated` ones, and models Antigravity retires drop out of the next discovery.
+- **1.x:** `OPENCODE_MODEL_DEFINITIONS` (what "Configure models in opencode.json" writes) is generated from the built-in snapshot.
+
+### Sidebar Limits and Account Management
+
+`tui.tsx` is a TUI plugin; OpenCode loads it next to `server.ts` and compiles its Solid JSX itself, so the file ships as source. It claims `append: "sidebar.content"` and registers the `/antigravity` command. Everything that needs tokens or the pool runs on the server, behind the RPC in `rpc.ts`:
+
+- **`quota`:** `checkAccountsQuota()` per pool account (Gemini Pro and Flash merged into one "Gemini" line, Claude and GPT-OSS in another), plus which account serves each group (`activeIndexByFamily`). Cached for a minute; the TUI polls every 2 minutes and after each response.
+- **`setAccountEnabled` / `removeAccount`:** go through the running pipeline's `AccountManager` (`getActiveAccountManager()`) when it exists, since it owns the pool in memory, or edit the file otherwise. Removal saves with `saveToDisk({ replace: true })`; the default save merges with the file and would bring the account back. Both methods declare a `failed` error so the TUI can show the real reason.
+- **Removed accounts stay removed:** the v1 `AccountManager` always adds the account behind the credential it is given. `poolAuth()` therefore hands it OpenCode's login only while that account is still in the pool, otherwise an enabled pool account.
+- **Re-authenticate / Add account** dispatch OpenCode's own `provider.connect` command (`/connect`).
+
+### Credentials
+
+- **Sign-in link:** both methods copy the authorization URL to the clipboard (`clip`, `pbcopy`, `wl-copy`/`xclip`/`xsel`; skipped over SSH). The plugin never opens a browser. OpenCode's CLI opens the link itself when it runs in a terminal; the TUI dialog does not (`c` copies, `o` opens).
+- **`antigravity` (browser):** starts the 1.x `startOAuthListener()` on `localhost:51121` (the redirect URI is fixed by the OAuth client) and returns `mode: "auto"`. Its `callback` promise resolves once the browser hits the listener, which serves the "All set!" page. The listener has a 5-minute timeout, under OpenCode's 10-minute attempt limit. It closes on success, failure, timeout and plugin cleanup, and a new attempt replaces an abandoned one. The method falls back to the paste flow when `shouldSkipLocalServer()` is true (WSL2 or remote) or the port is busy.
+- **`antigravity-paste`:** returns `mode: "code"` and accepts the pasted redirect URL or a bare code (the state comes from the authorization URL).
+- **Finish:** both methods exchange the code, add the account to `antigravity-accounts.json` (`persistAccountPool`), and return a `Credential.OAuth` carrying their method ID.
+- **Refresh:** OpenCode calls `refresh` when the stored token is within 5 minutes of expiry. It reuses `refreshAccessToken()`.
+- **Pipeline auth:** `getAuth()` resolves the active `google-antigravity` connection into the v1 `{ type: "oauth", refresh, access, expires }` shape. The v1 loader runs lazily on the first request. It runs again when the signed-in refresh token changes or a sign-in adds an account.
+- **Guard:** the v1 loader clears the account pool when it sees no OAuth credential. The adapter therefore never calls it without one, and answers `401 Not signed in` instead.
+
+### What the Client Shim Covers
+
+`client-shim.ts` gives the v1 code a stand-in client:
+
+- **Toasts:** `tui.showToast` only logs.
+- **Stored credential:** `auth.set` (clearing the stored credential after all accounts are revoked) is a no-op. The next request fails with a sign-in hint instead.
+- **Session calls:** `session.*` throws. Those calls are only reached from event-driven session recovery, which is not wired under OpenCode 2.
+
+### Not Yet Ported
+
+- **Session recovery:** recovery of interrupted tool calls (`session.error` → inject `tool_result`) and `auto_resume`. Thinking-block recovery inside the request pipeline still works.
+- **`google_search` tool:** OpenCode 2's tool API needs Effect Schema input definitions.
+- **Toasts and TUI log output** from the request pipeline. (Account management and quota have their own TUI plugin instead of the 1.x terminal menu.)
+
+---
+
 ## Session Recovery
+
+> **OpenCode 2:** the event-driven recovery below is not wired yet (see [Not Yet Ported](#not-yet-ported)). Thinking Block Order recovery happens inside the request pipeline and works on both versions.
 
 ### Tool Result Missing Error
 
@@ -274,6 +394,8 @@ export OPENCODE_ANTIGRAVITY_DEBUG_TUI=1  # TUI log panel output
 ### Log Location
 
 `~/.config/opencode/antigravity-logs/`
+
+On OpenCode 2, plugin load failures (`failed to load plugin`) go to the OpenCode server log at `~/.local/share/opencode/log/opencode.log`. `opencode plugin list` shows whether the plugin loaded.
 
 ### What To Check
 

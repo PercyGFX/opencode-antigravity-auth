@@ -4,6 +4,22 @@
     "description": "Google Antigravity IDE OAuth auth plugin for Opencode - access Gemini 3 Pro and Claude 4.6 using Google credentials",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./server": {
+            "types": "./dist/server.d.ts",
+            "import": "./dist/server.js"
+        },
+        "./tui": "./tui.tsx",
+        "./rpc": {
+            "types": "./dist/rpc.d.ts",
+            "import": "./dist/rpc.js"
+        },
+        "./package.json": "./package.json"
+    },
     "type": "module",
     "license": "MIT",
     "author": "noefabris",
@@ -31,7 +47,10 @@
     "files": [
         "dist/",
         "README.md",
-        "LICENSE"
+        "LICENSE",
+        "tui.tsx",
+        "rpc.ts",
+        "src/opencode-v2/quota-format.ts"
     ],
     "scripts": {
         "build": "tsc -p tsconfig.build.json",
@@ -49,17 +68,22 @@
         "typescript": "^5"
     },
     "devDependencies": {
+        "@opencode/plugin": "2.0.26",
+        "@opencode/theme": "2.0.26",
+        "@opentui/core": "0.6.2",
+        "@opentui/solid": "0.6.2",
         "@types/node": "^24.10.1",
         "@types/proper-lockfile": "^4.1.4",
         "@vitest/coverage-v8": "^3.0.0",
         "@vitest/ui": "^3.0.0",
+        "solid-js": "1.9.12",
         "typescript": "^5.0.0",
         "vitest": "^3.0.0",
         "zod-to-json-schema": "^3.25.1"
     },
     "dependencies": {
-        "@opencode-ai/plugin": "^0.15.30",
         "@openauthjs/openauth": "^0.4.3",
+        "@opencode-ai/plugin": "^0.15.30",
         "proper-lockfile": "^4.1.2",
         "xdg-basedir": "^5.1.0",
         "zod": "^4.0.0"

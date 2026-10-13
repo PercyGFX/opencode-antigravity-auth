@@ -9,14 +9,36 @@ OpenCode's variant system lets you configure the thinking budget dynamically wit
 When you define a model with `variants`, OpenCode shows variant options in the model picker. Selecting a variant passes the `providerOptions` to the plugin, which extracts the thinking configuration.
 
 ```bash
+# OpenCode 2: variant goes after "#"
+opencode run "Hello" --model google-antigravity/antigravity-claude-opus-4-6-thinking#max
+
+# OpenCode 1.x
 opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --variant=max
 ```
 
 ---
 
+## OpenCode 2
+
+On OpenCode 2 the models and their variants come from Antigravity's own model list (see [README: Model Reference](../README.md#model-reference)), so there is nothing to add to `opencode.json`:
+
+- **Gemini tiers:** Antigravity offers each tier as its own model (`Gemini 3.8 Flash (Low)` is `gemini-3.8-flash-low`). The plugin groups them into one model with `low` / `medium` / `high` variants and sends the upstream model of the tier you pick, with a matching `thinkingLevel`. Without a variant, Antigravity's default tier (high) is used.
+- **Claude thinking models** get `low` / `max` variants with the thinking budgets shown below.
+
+Each variant becomes `settings.thinkingConfig`, which OpenCode's Gemini client sends as `generationConfig.thinkingConfig`:
+
+| v1 variant option | Sent as |
+|-------------------|---------|
+| `{ "thinkingLevel": "high" }` | `thinkingConfig: { thinkingLevel: "high" }` |
+| `{ "thinkingConfig": { "thinkingBudget": 8192 } }` | `thinkingConfig: { thinkingBudget: 8192 }` |
+
+Variants follow Antigravity: a new tier appears after the next model discovery (after sign-in, or once the cached list is 6 hours old). The Claude budget variants are defined in `registryModelVariants()` in `src/plugin/config/models.ts`.
+
+---
+
 ## Variant Configuration
 
-Define variants in your model configuration:
+On OpenCode 1.x, define variants in your model configuration:
 
 ```json
 {
@@ -59,13 +81,13 @@ Gemini 3 models use string-based thinking levels. Available levels differ by mod
 
 > **Note:** The API rejects invalid levels (e.g., `"minimal"` on Pro). Configure variants accordingly.
 
-### Gemini 3 Pro Example
+### Gemini 3.1 Pro Example
 
 ```json
 {
-  "antigravity-gemini-3-pro": {
-    "name": "Gemini 3 Pro (Antigravity)",
-    "limit": { "context": 1048576, "output": 65535 },
+  "antigravity-gemini-3.1-pro": {
+    "name": "Gemini 3.1 Pro (Antigravity)",
+    "limit": { "context": 1048576, "output": 65536 },
     "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
     "variants": {
       "low": { "thinkingLevel": "low" },
@@ -75,16 +97,15 @@ Gemini 3 models use string-based thinking levels. Available levels differ by mod
 }
 ```
 
-### Gemini 3 Flash Example
+### Gemini 3.8 Flash Example
 
 ```json
 {
-  "antigravity-gemini-3-flash": {
-    "name": "Gemini 3 Flash (Antigravity)",
+  "antigravity-gemini-3.8-flash": {
+    "name": "Gemini 3.8 Flash (Antigravity)",
     "limit": { "context": 1048576, "output": 65536 },
     "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
     "variants": {
-      "minimal": { "thinkingLevel": "minimal" },
       "low": { "thinkingLevel": "low" },
       "medium": { "thinkingLevel": "medium" },
       "high": { "thinkingLevel": "high" }
@@ -157,10 +178,8 @@ Tier-suffixed model names are still accepted:
 - `antigravity-claude-opus-4-6-thinking-low`
 - `antigravity-claude-opus-4-6-thinking-medium`
 - `antigravity-claude-opus-4-6-thinking-high`
-- `antigravity-gemini-3-pro-low`
-- `antigravity-gemini-3-pro-high`
-- `gemini-3-pro-low`
-- `gemini-3-flash-medium`
+- `antigravity-gemini-3.8-flash-high` (the upstream ID itself)
+- `antigravity-gemini-3.1-pro-low`
 
 However, **we recommend using simplified model names with variants** for:
 

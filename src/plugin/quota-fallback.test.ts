@@ -171,6 +171,23 @@ describe("header routing decision", () => {
     });
   });
 
+  it("never falls back to Gemini CLI for models from Antigravity's own list", async () => {
+    const { builtinRegistryModels, resetRegistryForTests } = await import("./model-registry");
+    resetRegistryForTests(builtinRegistryModels());
+    try {
+      for (const model of ["antigravity-gemini-3.8-flash", "antigravity-gemini-3.1-pro", "gemini-3.6-flash-low"]) {
+        const decision = resolveHeaderRoutingDecision?.(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent`,
+          "gemini",
+          { cli_first: false },
+        );
+        expect(decision).toMatchObject({ preferredHeaderStyle: "antigravity", allowQuotaFallback: false });
+      }
+    } finally {
+      resetRegistryForTests();
+    }
+  });
+
   it("ignores legacy quota_fallback when deciding Gemini fallback availability", () => {
     const decision = resolveHeaderRoutingDecision?.(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:streamGenerateContent",

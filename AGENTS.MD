@@ -78,11 +78,33 @@ No linter or formatter is configured. Style is enforced by convention (see below
 - `createLogger("module-name")` for structured logging
 - `console.log` only for CLI/user-facing output
 
+## OpenCode Versions
+
+The plugin ships two entry points over one shared request pipeline:
+
+- `index.ts`: the OpenCode 1.x plugin (named exports of `createAntigravityPlugin`)
+- `server.ts`: the OpenCode 2 plugin (default export of `createAntigravityV2Plugin()`, from `src/opencode-v2/`)
+
+OpenCode 2 does not run 1.x plugins. The v2 adapter registers the `google-antigravity` integration and provider, and it points OpenCode's native Gemini client at a loopback proxy (`src/opencode-v2/proxy.ts`). The proxy feeds requests to the v1 `fetch` interceptor. Keep pipeline changes in the shared code so both versions get them. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#opencode-2-adapter).
+
+- v2 types come from `@opencode/plugin` (dev dependency, pinned to the OpenCode version); OpenCode provides it at runtime. `@opencode-ai/plugin` 0.15 is the 1.x SDK.
+- Never call the v1 `auth.loader` without an OAuth credential: it clears `antigravity-accounts.json`.
+- Models come from `src/plugin/model-registry.ts` (Antigravity's Recommended list via `model-discovery.ts`); don't hardcode model IDs or per-version routing. Never mark catalog models `deprecated`: OpenCode's model picker hides them.
+- `prepareAntigravityRequest()` keeps `effectiveModel` for name-based logic and sends `wireModel` (the registry's upstream ID). Registry models never fall back to the Gemini CLI quota.
+- RPC methods (`rpc.ts`) need an `output` schema and a declared `errors` map; undeclared errors reach the TUI as "RPC call failed".
+- Pool changes go through `getActiveAccountManager()` when the pipeline is running; removals must use `saveToDisk({ replace: true })`.
+- Tests that import `src/plugin.ts` must `vi.mock("@opencode-ai/plugin", () => ({ tool: vi.fn() }))`, because the 0.15 package uses extensionless ESM imports that only Bun resolves.
+
 ## Module Structure
 
 ```
+index.ts                     # OpenCode 1.x entry
+server.ts                    # OpenCode 2 entry (default export)
+tui.tsx                      # OpenCode 2 TUI plugin (sidebar limits, /antigravity); ships as source
+rpc.ts                       # RPC shared by server.ts and tui.tsx
 src/
 ├── plugin.ts                # Main entry, fetch interceptor
+├── opencode-v2/             # OpenCode 2 adapter (plugin, proxy, catalog, quota, accounts, client shim, clipboard)
 ├── constants.ts             # Endpoints, headers, API config, system prompts
 ├── antigravity/oauth.ts     # OAuth token exchange
 └── plugin/
