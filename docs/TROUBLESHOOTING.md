@@ -98,7 +98,7 @@ opencode auth login
 ### "This version of Antigravity is no longer supported"
 This almost always means an outdated Antigravity `User-Agent` is still being used.
 
-> **OpenCode 2:** update your clone (`git pull`), stop the background service with `opencode service stop`, delete `antigravity-accounts.json`, and sign in again with `opencode auth login google-antigravity`. The cache paths below only apply to npm installs on 1.x.
+> **OpenCode 2:** update the plugin (`opencode plugin update`, or `git pull` in a source checkout), stop the background service with `opencode service stop`, delete `antigravity-accounts.json`, and sign in again with `opencode auth login google-antigravity`. The cache paths below only apply to npm installs on 1.x.
 
 1) Stop any running OpenCode processes (stale processes can overwrite your accounts file):
 
@@ -232,7 +232,7 @@ Invalid JSON payload received. Unknown name "parameters" at 'request.tools[0]'
 - Plugin version regression
 
 **Solutions:**
-1. **Update the plugin.** On OpenCode 2, run `git pull` in your clone, then `opencode service restart`. On 1.x, use the latest beta:
+1. **Update the plugin.** On OpenCode 2, run `opencode plugin update` (or `git pull` in a source checkout), then `opencode service restart`. On 1.x, use the latest beta:
    ```json
    { "plugin": ["opencode-antigravity-auth@beta"] }
    ```
@@ -324,7 +324,7 @@ If you only have one account, you'll likely have a better experience using [Anti
 If adding new accounts:
 1. Delete accounts file: `rm ~/.config/opencode/antigravity-accounts.json`
 2. Re-authenticate: `opencode auth login google-antigravity` (OpenCode 2) or `opencode auth login` (1.x)
-3. Update to the latest plugin: `git pull` in your clone (OpenCode 2), or `"plugin": ["opencode-antigravity-auth@beta"]` (1.x)
+3. Update to the latest plugin: `opencode plugin update` (OpenCode 2), or `"plugin": ["opencode-antigravity-auth@beta"]` (1.x)
 4. Consider "warming up" the account in Antigravity IDE first
 
 </details>
@@ -432,7 +432,7 @@ ssh -L 51121:localhost:51121 user@remote
 ## Migrating Accounts Between Machines
 
 When copying `antigravity-accounts.json` to a new machine:
-1. Ensure the plugin is installed: the plugin folder on OpenCode 2, or `"plugin": ["opencode-antigravity-auth@beta"]` on 1.x
+1. Ensure the plugin is installed: `opencode plugin add @percygfx/opencode-antigravity-auth` on OpenCode 2, or `"plugin": ["opencode-antigravity-auth@beta"]` on 1.x
 2. Copy `~/.config/opencode/antigravity-accounts.json`
 3. On OpenCode 2, sign in once with `opencode auth login google-antigravity`. OpenCode keeps its own connection, separate from the accounts file, and the models only appear once that connection exists.
 4. If you get "API key missing" error, the refresh token may be invalid — re-authenticate
@@ -477,7 +477,7 @@ You don't need them. This plugin handles all Google OAuth.
 
 ### OpenCode 1.x → 2.x
 
-1. Replace the npm plugin entry with the path to a clone of the `opencode-v2` branch. It must be a folder, not a `.js` file (see the [README](../README.md#installation)).
+1. Remove the 1.x `opencode-antigravity-auth` entry from the `plugin` list in `opencode.json`, then install this build: `opencode plugin add @percygfx/opencode-antigravity-auth` (see the [README](../README.md#installation)).
 2. Delete the `provider.google.models` block (`antigravity-*` and `gemini-*` entries). The plugin now registers these models under the `google-antigravity` provider.
 3. Sign in once with `opencode auth login google-antigravity`. Your existing `antigravity-accounts.json` is reused, and the new sign-in is added to it.
 4. Update model references: `google/<model>` → `google-antigravity/<model>`, and `--variant=max` → `--model google-antigravity/<model>#max`.

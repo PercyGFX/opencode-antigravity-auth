@@ -1,7 +1,7 @@
 {
-    "name": "opencode-antigravity-auth",
-    "version": "1.6.0",
-    "description": "Google Antigravity IDE OAuth auth plugin for Opencode - access Gemini 3 Pro and Claude 4.6 using Google credentials",
+    "name": "@percygfx/opencode-antigravity-auth",
+    "version": "2.0.0",
+    "description": "Google Antigravity OAuth plugin for OpenCode 2 (and 1.x): Gemini, Claude and GPT-OSS with your Google accounts, plus quota limits and account management in the TUI",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
@@ -13,7 +13,7 @@
             "types": "./dist/server.d.ts",
             "import": "./dist/server.js"
         },
-        "./tui": "./tui.tsx",
+        "./tui": "./dist/tui.js",
         "./rpc": {
             "types": "./dist/rpc.d.ts",
             "import": "./dist/rpc.js"
@@ -23,13 +23,16 @@
     "type": "module",
     "license": "MIT",
     "author": "noefabris",
+    "contributors": [
+        "PercyGFX (https://github.com/PercyGFX)"
+    ],
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/NoeFabris/opencode-antigravity-auth.git"
+        "url": "git+https://github.com/PercyGFX/opencode-antigravity-auth.git"
     },
-    "homepage": "https://github.com/NoeFabris/opencode-antigravity-auth#readme",
+    "homepage": "https://github.com/PercyGFX/opencode-antigravity-auth#readme",
     "bugs": {
-        "url": "https://github.com/NoeFabris/opencode-antigravity-auth/issues"
+        "url": "https://github.com/PercyGFX/opencode-antigravity-auth/issues"
     },
     "keywords": [
         "opencode",
@@ -39,21 +42,23 @@
         "oauth",
         "plugin",
         "auth",
-        "claude"
+        "claude",
+        "opencode-plugin",
+        "opencode-2"
     ],
     "engines": {
         "node": ">=20.0.0"
     },
+    "publishConfig": {
+        "access": "public"
+    },
     "files": [
         "dist/",
         "README.md",
-        "LICENSE",
-        "tui.tsx",
-        "rpc.ts",
-        "src/opencode-v2/quota-format.ts"
+        "LICENSE"
     ],
     "scripts": {
-        "build": "tsc -p tsconfig.build.json",
+        "build": "tsc -p tsconfig.build.json && node scripts/build-tui.mjs",
         "build:schema": "npx tsx script/build-schema.ts",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
@@ -68,6 +73,8 @@
         "typescript": "^5"
     },
     "devDependencies": {
+        "@babel/core": "7.29.7",
+        "@babel/preset-typescript": "7.27.1",
         "@opencode/plugin": "2.0.26",
         "@opencode/theme": "2.0.26",
         "@opentui/core": "0.6.2",
@@ -76,6 +83,7 @@
         "@types/proper-lockfile": "^4.1.4",
         "@vitest/coverage-v8": "^3.0.0",
         "@vitest/ui": "^3.0.0",
+        "babel-preset-solid": "1.9.12",
         "solid-js": "1.9.12",
         "typescript": "^5.0.0",
         "vitest": "^3.0.0",

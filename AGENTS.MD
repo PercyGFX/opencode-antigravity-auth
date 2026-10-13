@@ -10,7 +10,7 @@ OpenCode plugin for Google Antigravity OAuth. Intercepts `fetch()` calls to `gen
 
 ```bash
 npm install                          # Install dependencies
-npm run build                        # Compile (tsc -p tsconfig.build.json)
+npm run build                        # Compile (tsc -p tsconfig.build.json, then tui.tsx -> dist/tui.js)
 npm run typecheck                    # Type-check only (tsc --noEmit)
 npm test                             # Run all tests (vitest run)
 npx vitest run src/plugin/auth.test.ts          # Single test file
@@ -100,7 +100,7 @@ OpenCode 2 does not run 1.x plugins. The v2 adapter registers the `google-antigr
 ```
 index.ts                     # OpenCode 1.x entry
 server.ts                    # OpenCode 2 entry (default export)
-tui.tsx                      # OpenCode 2 TUI plugin (sidebar limits, /antigravity); ships as source
+tui.tsx                      # OpenCode 2 TUI plugin (sidebar limits, /antigravity); npm ships it compiled (dist/tui.js)
 rpc.ts                       # RPC shared by server.ts and tui.tsx
 src/
 ├── plugin.ts                # Main entry, fetch interceptor
