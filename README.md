@@ -1,8 +1,5 @@
-# Antigravity + Gemini CLI OAuth Plugin for Opencode
+# Antigravity + Gemini CLI OAuth Plugin for Opencode (OpenCode 2 supported)
 
-[![npm version](https://img.shields.io/npm/v/opencode-antigravity-auth.svg)](https://www.npmjs.com/package/opencode-antigravity-auth)
-[![npm beta](https://img.shields.io/npm/v/opencode-antigravity-auth/beta.svg?label=beta)](https://www.npmjs.com/package/opencode-antigravity-auth)
-[![npm downloads](https://img.shields.io/npm/dw/opencode-antigravity-auth.svg)](https://www.npmjs.com/package/opencode-antigravity-auth)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![X (Twitter)](https://img.shields.io/badge/X-@dopesalmon-000000?style=flat&logo=x)](https://x.com/dopesalmon)
 
@@ -15,7 +12,7 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 
 - **Gemini 3.8 Flash, Claude Opus/Sonnet 4.6** and the rest of Antigravity's models via Google OAuth
 - **Automatic model list** — the models come from Antigravity's own Recommended list, so new ones appear without a plugin update (OpenCode 2)
-- **Limits in the sidebar** — each account's 5-hour quota and the account serving your model, right in the TUI (OpenCode 2)
+- **Limits in the sidebar** — each account's 5-hour and weekly quota and the account serving your model, right in the TUI (OpenCode 2)
 - **Multi-account support** — add multiple Google accounts, auto-rotates when rate-limited; manage them from the TUI with `/antigravity` (OpenCode 2)
 - **Dual quota system** — access both Antigravity and Gemini CLI quotas from one plugin
 - **Thinking models** — extended thinking for Claude and Gemini 3 with configurable budgets
@@ -315,26 +312,28 @@ Each sign-in adds one account to `~/.config/opencode/antigravity-accounts.json`,
 
 ### Accounts and limits in the TUI (OpenCode 2)
 
-The session sidebar has an **Antigravity · 5h limits** section:
+The session sidebar has an **Antigravity · limits** section:
 
 ```
-Antigravity · 5h limits
-• you@gmail.com                in use
-    Gemini              99%  4h 37m
-    Claude & GPT-OSS   100%  5h 00m
-• other@gmail.com               Claude
-    Gemini              98%  4h 36m
-    Claude & GPT-OSS   100%  5h 00m
+Antigravity · limits
+• you@gmail.com              in use
+  Gemini          5h  99%  4h 16m
+                  wk  99%  6d 23h
+  Claude & GPT    5h 100%  5h 00m
+                  wk 100%  6d 23h
+• other@gmail.com            Claude
+  Gemini          5h  98%  4h 15m
+  ...
   manage: /antigravity
 ```
 
-- **Limits** — the remaining share of each account's 5-hour Antigravity quota and when it resets. Gemini models share one quota, Claude and GPT-OSS another. Antigravity reports no weekly limit, so there is none to show. The dot turns yellow at 30% and red at 10%.
+- **Limits** — the same numbers as Antigravity's *Settings → Models*: for each model group (Gemini; Claude & GPT), the remaining share of the **5-hour** limit (`5h`) and the **weekly** limit (`wk`), and when each fully refreshes. The 5-hour limit spreads global capacity across all users; the weekly limit depends on your plan. The dot turns yellow at 30% and red at 10% on either window.
 - **In use** — the account currently serving the selected model's group is bold and marked *in use*; the other accounts show which group they serve.
 - **Manage** — click an account, or run `/antigravity` (also in the command palette as *Antigravity accounts*):
   - **Disable / Enable** — take the account out of rotation or put it back
-  - **Re-authenticate** — opens *Connect an integration*; sign in with the same Google account and its entry is updated
+  - **Re-authenticate** — shows the sign-in link right away (also copied to your clipboard), with that Google account preselected. Sign in and the dialog closes by itself; if the browser says the page can't be reached, paste that page's URL into the dialog instead. Only the plugin's account is updated, so no extra opencode login is created.
   - **Remove** — removes the account from the plugin (asks first)
-  - **Add account** (in `/antigravity`) — opens *Connect an integration* to sign in with another Google account
+  - **Add account** (in `/antigravity`) — the same sign-in dialog, for another Google account. Your very first account goes through `/connect` instead, which creates opencode's Antigravity login.
 
 The limits refresh every 2 minutes and after each response. `opencode auth logout google-antigravity` signs out of opencode's Antigravity login; after removing your last account, use it to sign out completely.
 

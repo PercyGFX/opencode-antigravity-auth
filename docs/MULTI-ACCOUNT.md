@@ -55,7 +55,7 @@ opencode auth login
 # Select "Check quotas" from the menu
 ```
 
-On OpenCode 2 the session sidebar shows each account's quota (the **Antigravity · 5h limits** section), refreshed every 2 minutes and after each response. Antigravity reports a 5-hour window per quota group (Gemini; Claude & GPT-OSS) and no weekly limit. See [README: Accounts and limits in the TUI](../README.md#accounts-and-limits-in-the-tui-opencode-2).
+On OpenCode 2 the session sidebar shows each account's quota (the **Antigravity · limits** section), refreshed every 2 minutes and after each response: the 5-hour and the weekly limit per model group (Gemini; Claude & GPT), the same numbers as Antigravity's *Settings → Models* page. See [README: Accounts and limits in the TUI](../README.md#accounts-and-limits-in-the-tui-opencode-2).
 
 This shows remaining quota percentages and reset times for each model family:
 - **Claude** - Claude Opus/Sonnet quota

@@ -1,6 +1,7 @@
 import {
   ANTIGRAVITY_ENDPOINT_PROD,
   getAntigravityHeaders,
+  getHubUserAgent,
   ANTIGRAVITY_PROVIDER_ID,
 } from "../constants";
 import { accessTokenExpired, formatRefreshParts, parseRefreshParts } from "./auth";
@@ -49,6 +50,30 @@ interface RetrieveUserQuotaResponse {
   }[];
 }
 
+/** One window of a `retrieveUserQuotaSummary` group, e.g. the weekly or the 5-hour limit. */
+export interface QuotaSummaryBucket {
+  bucketId?: string;
+  displayName?: string;
+  /** "5h" or "weekly" as of October 2026. */
+  window?: string;
+  resetTime?: string;
+  remainingFraction?: number;
+  description?: string;
+}
+
+/** A group of models sharing limits, e.g. "Gemini Models" or "Claude and GPT models". */
+export interface QuotaSummaryGroup {
+  displayName?: string;
+  description?: string;
+  buckets?: QuotaSummaryBucket[];
+}
+
+/** `retrieveUserQuotaSummary`: the 5-hour and weekly limits Antigravity's settings page shows. */
+export interface QuotaSummaryResponse {
+  groups?: QuotaSummaryGroup[];
+  description?: string;
+}
+
 export type AccountQuotaStatus = "ok" | "disabled" | "error";
 
 export interface AccountQuotaResult {
@@ -58,6 +83,8 @@ export interface AccountQuotaResult {
   error?: string;
   disabled?: boolean;
   quota?: QuotaSummary;
+  /** Weekly and 5-hour limits per model group; undefined when the summary is unavailable. */
+  quotaSummary?: QuotaSummaryResponse;
   geminiCliQuota?: GeminiCliQuotaSummary;
   updatedAccount?: AccountMetadataV3;
 }
@@ -215,6 +242,25 @@ async function fetchAvailableModels(
   throw new Error(errors.join("; ") || "fetchAvailableModels failed");
 }
 
+async function fetchQuotaSummary(accessToken: string, projectId: string): Promise<QuotaSummaryResponse | undefined> {
+  try {
+    const response = await fetchWithTimeout(`${ANTIGRAVITY_ENDPOINT_PROD}/v1internal:retrieveUserQuotaSummary`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "User-Agent": getHubUserAgent(),
+      },
+      body: JSON.stringify(projectId ? { project: projectId } : {}),
+    });
+    if (!response.ok) return undefined;
+    const data = (await response.json()) as QuotaSummaryResponse;
+    return Array.isArray(data.groups) ? data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function fetchGeminiCliQuota(
   accessToken: string,
   projectId: string,
@@ -338,11 +384,12 @@ export async function checkAccountsQuota(
       let quotaResult: QuotaSummary;
       let geminiCliQuotaResult: GeminiCliQuotaSummary;
       
-      // Fetch both Antigravity and Gemini CLI quotas in parallel
-      const [antigravityResponse, geminiCliResponse] = await Promise.all([
+      // Fetch Antigravity, Gemini CLI and summary (weekly + 5-hour) quotas in parallel
+      const [antigravityResponse, geminiCliResponse, quotaSummary] = await Promise.all([
         fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId)
           .catch((error): FetchAvailableModelsResponse => ({ models: undefined })),
         fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId),
+        fetchQuotaSummary(auth.access ?? "", projectContext.effectiveProjectId),
       ]);
 
       // Process Antigravity quota
@@ -370,6 +417,7 @@ export async function checkAccountsQuota(
         status: "ok",
         disabled,
         quota: quotaResult,
+        ...(quotaSummary ? { quotaSummary } : {}),
         geminiCliQuota: geminiCliQuotaResult,
         updatedAccount,
       });

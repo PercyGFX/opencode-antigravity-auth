@@ -65,7 +65,14 @@ Antigravity can run out of quota for a model group (e.g. Gemini 3.1 Pro) while t
 
 ### Managing accounts
 
-Click an account in the sidebar, or run `/antigravity`: **Disable / Enable**, **Re-authenticate** (opens `/connect`), **Remove**, and **Add account**. Removing your last account leaves OpenCode's own login; run `opencode auth logout google-antigravity` to sign out completely.
+Click an account in the sidebar, or run `/antigravity`: **Disable / Enable**, **Re-authenticate** (shows the sign-in link with that account preselected), **Remove**, and **Add account**. Removing your last account leaves OpenCode's own login; run `opencode auth logout google-antigravity` to sign out completely.
+
+### The callback page says "This site can't be reached"
+
+Nothing was listening on `localhost:51121` when the browser got there: the plugin reloaded (for example after an update), the sign-in waited longer than 9 minutes, or the browser runs on another machine. The URL in the address bar still completes the sign-in:
+
+- **Re-authenticate / Add account from `/antigravity`:** paste the page's full URL into the open dialog.
+- **`/connect` or `opencode auth login`:** choose **Google account (Antigravity, paste the redirect URL)** and paste it there, or start the sign-in again.
 
 ### Toasts, session recovery, `google_search` missing
 

@@ -11,8 +11,9 @@ import {
   accountLevel,
   formatPercent,
   formatReset,
-  limitLevel,
   sortAccounts,
+  windowLevel,
+  windowsOf,
   type QuotaLevel,
 } from "./src/opencode-v2/quota-format";
 
@@ -69,6 +70,75 @@ export default Plugin.define({
 
     const connect = () => context.keymap.dispatch(CONNECT_COMMAND);
 
+    /**
+     * Re-authenticates `email` (Google preselects it) or adds an account. The plugin runs the
+     * sign-in itself, so it updates the account pool without another opencode login.
+     */
+    const signIn = async (email?: string) => {
+      let attempt: Awaited<ReturnType<typeof rpc.signInStart>>;
+      try {
+        attempt = await rpc.signInStart(email ? { email } : {});
+      } catch (error) {
+        toastError(error);
+        return;
+      }
+      const title = email ? `Re-authenticate ${email}` : "Add an Antigravity account";
+      const cancel = () => void rpc.signInCancel({ attemptID: attempt.attemptID }).catch(() => {});
+      const finished = (signedIn: string | undefined) => {
+        if (email && signedIn && signedIn.toLowerCase() !== email.toLowerCase()) {
+          context.ui.toast.show({
+            message: `Signed in as ${signedIn}; it was added as another account (${email} is unchanged)`,
+            variant: "warning",
+          });
+        } else {
+          context.ui.toast.show({ message: `${signedIn ?? "Account"} signed in`, variant: "success" });
+        }
+        void refresh(true);
+      };
+
+      // One prompt for both modes. In browser mode it also closes by itself once the browser
+      // reaches the callback page; pasting is the fallback when the page can't be reached.
+      let done = false;
+      const timer = setInterval(() => {
+        if (attempt.mode !== "auto") return;
+        void rpc
+          .signInStatus({ attemptID: attempt.attemptID })
+          .then((result) => {
+            if (done || result.status === "pending") return;
+            done = true;
+            clearInterval(timer);
+            context.ui.dialog.clear();
+            if (result.status === "complete") finished(result.email);
+            else
+              context.ui.toast.show({
+                message: result.status === "failed" ? (result.message ?? "Sign-in failed") : "Sign-in expired; start it again",
+                variant: "error",
+              });
+          })
+          .catch(() => {});
+      }, 1000);
+      const pasted = await context.ui.dialog.prompt({
+        title,
+        description:
+          attempt.mode === "auto"
+            ? `${attempt.instructions}\n\n${attempt.url}\n\nThis closes by itself once you finish. If the browser says the page can't be reached, paste that page's full URL here.`
+            : `${attempt.instructions}\n\n${attempt.url}`,
+        placeholder: attempt.mode === "auto" ? "…or paste the redirect URL" : "Redirect URL or code",
+      });
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      if (!pasted) {
+        cancel();
+        return;
+      }
+      try {
+        finished((await rpc.signInComplete({ attemptID: attempt.attemptID, code: pasted })).email);
+      } catch (error) {
+        toastError(error);
+      }
+    };
+
     const manage = async (account: QuotaAccount) => {
       const action = await context.ui.dialog.select<AccountAction>({
         title: account.email,
@@ -81,7 +151,7 @@ export default Plugin.define({
           {
             title: "Re-authenticate",
             value: "reauth",
-            description: "Sign in again with this Google account (Connect an integration → Google Antigravity)",
+            description: "Sign in again with this Google account (shows the sign-in link)",
           },
           { title: "Remove", value: "remove", description: "Remove this account from the plugin" },
         ],
@@ -95,7 +165,7 @@ export default Plugin.define({
           });
           await refresh(true);
         } else if (action === "reauth") {
-          connect();
+          await signIn(account.email);
         } else if (action === "remove") {
           const confirmed = await context.ui.dialog.confirm({
             title: `Remove ${account.email}?`,
@@ -129,13 +199,19 @@ export default Plugin.define({
             value: account as QuotaAccount | "add",
             description: account.error
               ? account.error
-              : account.limits.map((limit) => `${limit.name} ${formatPercent(limit)}`).join(" · "),
+              : account.limits
+                  .map((limit) => `${limit.name} ${windowsOf(limit).map((entry) => `${entry.label} ${formatPercent(entry.window)}`).join(" ")}`)
+                  .join(" · "),
             footer: !account.enabled ? "disabled" : servesCurrent(account) ? "in use" : account.inUse.join(", "),
           })),
           { title: "Add account", value: "add", description: "Sign in with another Google account" },
         ],
       });
-      if (choice === "add") connect();
+      // The first account must go through /connect, which creates opencode's login.
+      if (choice === "add") {
+        if (accounts.length > 0) await signIn();
+        else connect();
+      }
       else if (choice) await manage(choice);
     };
 
@@ -165,7 +241,7 @@ export default Plugin.define({
           <box>
             <text fg={theme.text.base}>
               <b>Antigravity</b>
-              <span style={{ fg: theme.text.muted }}> · 5h limits</span>
+              <span style={{ fg: theme.text.muted }}> · limits</span>
             </text>
             <For each={sortAccounts(snapshot()?.accounts ?? [], currentGroup())}>
               {(account) => (
@@ -195,17 +271,24 @@ export default Plugin.define({
                   >
                     <For each={account.limits}>
                       {(limit) => (
-                        <box flexDirection="row" gap={1} minWidth={0}>
-                          <text fg={theme.text.muted} wrapMode="none" truncate flexGrow={1} flexShrink={1} minWidth={0}>
-                            {`  ${limit.name}`}
-                          </text>
-                          <text fg={color(limitLevel(limit))} wrapMode="none" flexShrink={0}>
-                            {formatPercent(limit)}
-                          </text>
-                          <text fg={theme.text.muted} wrapMode="none" flexShrink={0}>
-                            {formatReset(limit.resetAt, now())}
-                          </text>
-                        </box>
+                        <For each={windowsOf(limit)}>
+                          {(entry, position) => (
+                            <box flexDirection="row" gap={1} minWidth={0}>
+                              <text fg={theme.text.muted} wrapMode="none" truncate flexGrow={1} flexShrink={1} minWidth={0}>
+                                {position() === 0 ? `  ${limit.name}` : ""}
+                              </text>
+                              <text fg={theme.text.muted} wrapMode="none" flexShrink={0}>
+                                {entry.label}
+                              </text>
+                              <text fg={color(windowLevel(entry.window))} wrapMode="none" flexShrink={0}>
+                                {formatPercent(entry.window).padStart(4)}
+                              </text>
+                              <text fg={theme.text.muted} wrapMode="none" flexShrink={0}>
+                                {formatReset(entry.window.resetAt, now()).padStart(6)}
+                              </text>
+                            </box>
+                          )}
+                        </For>
                       )}
                     </For>
                   </Show>
