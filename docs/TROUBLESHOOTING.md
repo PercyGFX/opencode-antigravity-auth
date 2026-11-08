@@ -98,7 +98,7 @@ opencode auth login
 ### "This version of Antigravity is no longer supported"
 This almost always means an outdated Antigravity `User-Agent` is still being used.
 
-> **OpenCode 2:** update the plugin (`opencode plugin update`, or `git pull` in a source checkout), stop the background service with `opencode service stop`, delete `antigravity-accounts.json`, and sign in again with `opencode auth login google-antigravity`. The cache paths below only apply to npm installs on 1.x.
+> **OpenCode 2:** update the plugin to 2.0.1 or later (`opencode plugin update`, or `git pull` and `npm run build` in a source checkout), then run `opencode service restart`. No need to delete accounts: 2.0.1 sends the current client's User-Agent on every request (older versions sent an outdated one for most models, and Google streamed this message back as the reply). If it comes back after a new Antigravity release, `ANTIGRAVITY_HUB_VERSION` and `ANTIGRAVITY_HUB_CL` in `src/constants.ts` need bumping. The steps below only apply to npm installs on 1.x.
 
 1) Stop any running OpenCode processes (stale processes can overwrite your accounts file):
 

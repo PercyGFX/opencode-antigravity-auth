@@ -1,6 +1,19 @@
 # Changelog
 
-## [Unreleased] - OpenCode 2 support
+## [2.0.1] - 2026-11-09
+
+### Added
+
+- **Models per account** - Plans offer different models: free accounts get Claude Sonnet/Opus 4.6, paid Pro accounts get Claude Opus/Sonnet 5.5 and Gemini 4 Argon. The plugin now asks Antigravity for each account's models, stores them with the account (`availableModels` in `antigravity-accounts.json`), and offers every model at least one account has. Requests only go to accounts that have the requested model; if no enabled account has it, the request fails right away with a clear message instead of a misleading rate-limit wait. Free plans' disabled placeholders (e.g. "Gemini 4 Argon — Unavailable") are left out.
+- **Suspended accounts are taken out of rotation** - When Google answers "This service has been disabled in this account for violation of Terms of Service", the account is disabled (saved at once), a message names it, and the request is retried on another account. Re-enable it from `/antigravity` after a successful appeal.
+
+### Fixed
+
+- **"This version of Antigravity is no longer supported"** - The plugin reported Antigravity 2.8.0, which Google now treats as outdated: streamed replies became that message, and Gemini 4 Argon was hidden. Every request now sends the current client's User-Agent (2.23.0).
+- **Shared fallback project** - The project lookup sent `platform: "WINDOWS"`/`"MACOS"`, which Cloud Code rejects, so every account fell back to one shared default project. The lookup now sends only `ideType`, and each account uses its own project. Onboarding uses the current client's fields.
+- Saving the pool keeps the newer model list, so an account manager loaded before a discovery can't drop it. The model cache moves to version 2 (old single-account caches are ignored).
+
+## [2.0.0] - 2026-10-13 - OpenCode 2 support
 
 ### Added
 
