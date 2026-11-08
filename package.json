@@ -1,6 +1,6 @@
 {
     "name": "@percygfx/opencode-antigravity-auth",
-    "version": "2.0.1",
+    "version": "2.0.2",
     "description": "Google Antigravity OAuth plugin for OpenCode 2 (and 1.x): Gemini, Claude and GPT-OSS with your Google accounts, plus quota limits and account management in the TUI",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
