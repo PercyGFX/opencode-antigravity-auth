@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   refreshAccessToken: vi.fn(),
   startOAuthListener: vi.fn(),
   shouldSkipLocalServer: vi.fn(() => false),
-  discoverRegistryModels: vi.fn(),
+  discoverAccountModels: vi.fn(),
   quotaReporter: vi.fn(async (_refresh?: boolean) => ({ fetchedAt: 1, accounts: [] })),
   quotaInvalidate: vi.fn(),
 }));
@@ -37,7 +37,7 @@ vi.mock("../antigravity/oauth", () => ({
 }));
 vi.mock("./clipboard", () => ({ copyToClipboard: mocks.copyToClipboard }));
 vi.mock("../plugin/token", () => ({ refreshAccessToken: mocks.refreshAccessToken }));
-vi.mock("../plugin/model-discovery", () => ({ discoverRegistryModels: mocks.discoverRegistryModels }));
+vi.mock("../plugin/model-discovery", () => ({ discoverAccountModels: mocks.discoverAccountModels }));
 vi.mock("./quota", () => ({
   createQuotaReporter: () => ({ snapshot: mocks.quotaReporter, invalidate: mocks.quotaInvalidate }),
 }));
@@ -154,7 +154,7 @@ beforeEach(() => {
   registryDir = mkdtempSync(join(tmpdir(), "antigravity-v2-"));
   process.env.OPENCODE_CONFIG_DIR = registryDir;
   resetRegistryForTests(builtinRegistryModels());
-  mocks.discoverRegistryModels.mockResolvedValue(builtinRegistryModels());
+  mocks.discoverAccountModels.mockResolvedValue({ models: builtinRegistryModels(), available: [] });
 });
 
 afterEach(async () => {
@@ -458,34 +458,33 @@ describe("model discovery", () => {
     const { registration, providerReload } = await track();
     const authorization = await registration.authorize({});
     await authorization.callback("http://localhost:51121/oauth-callback?code=c&state=STATE123");
-    await settle();
 
-    expect(mocks.discoverRegistryModels).toHaveBeenCalledWith("new-access", "project-9");
-    expect(providerReload).toHaveBeenCalled();
+    // Discovery stores the account's list under the pool's file lock, so it takes a moment.
+    await vi.waitFor(() => expect(providerReload).toHaveBeenCalled());
+    expect(mocks.discoverAccountModels).toHaveBeenCalledWith("new-access", "project-9");
   });
 
   it("refreshes a list that was never discovered as soon as someone is signed in", async () => {
     const { providerReload } = await track(SIGNED_IN);
-    await settle();
-    expect(mocks.discoverRegistryModels).toHaveBeenCalledWith("access-token", "project-1");
-    expect(providerReload).toHaveBeenCalled();
+    await vi.waitFor(() => expect(providerReload).toHaveBeenCalled());
+    expect(mocks.discoverAccountModels).toHaveBeenCalledWith("access-token", "project-1");
   });
 
   it("does not ask again while the discovered list is fresh", async () => {
     setRegistryModels(builtinRegistryModels(), Date.now());
     await track(SIGNED_IN);
     await settle();
-    expect(mocks.discoverRegistryModels).not.toHaveBeenCalled();
+    expect(mocks.discoverAccountModels).not.toHaveBeenCalled();
   });
 
   it("does nothing before sign-in", async () => {
     await track();
     await settle();
-    expect(mocks.discoverRegistryModels).not.toHaveBeenCalled();
+    expect(mocks.discoverAccountModels).not.toHaveBeenCalled();
   });
 
   it("keeps the current list when discovery fails", async () => {
-    mocks.discoverRegistryModels.mockRejectedValueOnce(new Error("fetchAvailableModels 503"));
+    mocks.discoverAccountModels.mockRejectedValueOnce(new Error("fetchAvailableModels 503"));
     const { providerReload, added } = await track(SIGNED_IN);
     await settle();
     expect(providerReload).not.toHaveBeenCalled();

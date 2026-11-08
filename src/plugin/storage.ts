@@ -202,6 +202,20 @@ export interface AccountMetadataV3 {
   /** Cached soft quota data */
   cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
   cachedQuotaUpdatedAt?: number;
+  /**
+   * Upstream model IDs this account may call, from its last model discovery. Plans differ (free
+   * accounts lack Claude 5.5 and Gemini 4 Argon), so requests only go to accounts listing the
+   * model. Unset until the first discovery: such accounts are not filtered.
+   */
+  availableModels?: string[];
+  availableModelsUpdatedAt?: number;
+}
+
+/** A discovered model list for the account holding `refreshToken`. */
+export interface AccountModelsUpdate {
+  refreshToken: string;
+  availableModels: string[];
+  availableModelsUpdatedAt: number;
 }
 
 export interface AccountStorageV3 {
@@ -461,6 +475,11 @@ function mergeAccountStorage(
     }
 
     const existingAcc = merged[index]!;
+    // An account manager loaded before the last discovery must not drop or roll back its list.
+    const newerModels =
+      (acc.availableModelsUpdatedAt ?? 0) >= (existingAcc.availableModelsUpdatedAt ?? 0) && acc.availableModels
+        ? acc
+        : existingAcc;
     merged[index] = {
       ...existingAcc,
       ...acc,
@@ -472,6 +491,8 @@ function mergeAccountStorage(
         ...acc.rateLimitResetTimes,
       },
       lastUsed: Math.max(existingAcc.lastUsed || 0, acc.lastUsed || 0),
+      availableModels: newerModels.availableModels,
+      availableModelsUpdatedAt: newerModels.availableModelsUpdatedAt,
     };
     indexByToken.set(acc.refreshToken, index);
   }
@@ -754,22 +775,50 @@ export async function saveAccounts(
     const existing = await loadAccountsUnsafe();
     const unretired = (options.unretireTokens ?? []).map(hashRefreshToken);
     const merged = existing ? mergeAccountStorage(existing, storage, unretired) : storage;
+    await writeStorageFile(path, merged);
+  });
+}
 
-    const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
-    const content = JSON.stringify(merged, null, 2);
-
+/** Writes through a temp file and a rename, so readers never see a half-written pool. */
+async function writeStorageFile(path: string, storage: AccountStorageV4): Promise<void> {
+  const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    await fs.writeFile(tempPath, JSON.stringify(storage, null, 2), { encoding: "utf-8", mode: 0o600 });
+    await fs.rename(tempPath, path);
+  } catch (error) {
+    // Clean up temp file on failure to prevent accumulation
     try {
-      await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-      await fs.rename(tempPath, path);
-    } catch (error) {
-      // Clean up temp file on failure to prevent accumulation
-      try {
-        await fs.unlink(tempPath);
-      } catch {
-        // Ignore cleanup errors (file may not exist)
-      }
-      throw error;
+      await fs.unlink(tempPath);
+    } catch {
+      // Ignore cleanup errors (file may not exist)
     }
+    throw error;
+  }
+}
+
+/**
+ * Stores discovered model lists on their accounts, changing nothing else. Reads and writes under
+ * the file lock, so it cannot undo a concurrent change by a running account manager.
+ */
+export async function updateAccountModels(updates: readonly AccountModelsUpdate[]): Promise<void> {
+  if (updates.length === 0) return;
+  const path = getStoragePath();
+  await withFileLock(path, async () => {
+    const existing = await loadAccountsUnsafe();
+    if (!existing) return;
+    const byToken = new Map(updates.map((update) => [update.refreshToken, update] as const));
+    let changed = false;
+    const accounts = existing.accounts.map((account) => {
+      const update = byToken.get(account.refreshToken);
+      if (!update || (account.availableModelsUpdatedAt ?? 0) > update.availableModelsUpdatedAt) return account;
+      changed = true;
+      return {
+        ...account,
+        availableModels: update.availableModels,
+        availableModelsUpdatedAt: update.availableModelsUpdatedAt,
+      };
+    });
+    if (changed) await writeStorageFile(path, { ...existing, accounts });
   });
 }
 
@@ -793,20 +842,7 @@ export async function saveAccountsReplace(storage: AccountStorageV4): Promise<vo
       accounts: withoutRetired(storage.accounts, retired),
       ...(retired.length > 0 ? { retiredTokenHashes: retired } : {}),
     };
-    const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
-    const content = JSON.stringify(storage, null, 2);
-
-    try {
-      await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-      await fs.rename(tempPath, path);
-    } catch (error) {
-      try {
-        await fs.unlink(tempPath);
-      } catch {
-        // Ignore cleanup errors
-      }
-      throw error;
-    }
+    await writeStorageFile(path, storage);
   });
 }
 

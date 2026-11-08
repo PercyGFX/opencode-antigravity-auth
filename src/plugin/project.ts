@@ -1,5 +1,6 @@
 import {
-  getAntigravityHeaders,
+  ANTIGRAVITY_HUB_VERSION,
+  getHubUserAgent,
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
   ANTIGRAVITY_LOAD_ENDPOINTS,
   ANTIGRAVITY_DEFAULT_PROJECT_ID,
@@ -13,10 +14,13 @@ const log = createLogger("project");
 const projectContextResultCache = new Map<string, ProjectContextResult>();
 const projectContextPendingCache = new Map<string, Promise<ProjectContextResult>>();
 
+/**
+ * loadCodeAssist metadata as the current Antigravity client sends it. No platform or plugin
+ * type: Cloud Code rejects "WINDOWS"/"MACOS" as platform values with a 400, and the lookup then
+ * fell back to the shared default project instead of the account's own.
+ */
 const CODE_ASSIST_METADATA = {
   ideType: "ANTIGRAVITY",
-  platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
-  pluginType: "GEMINI",
 } as const;
 
 interface AntigravityUserTier {
@@ -45,8 +49,6 @@ interface OnboardUserPayload {
 function buildMetadata(projectId?: string): Record<string, string> {
   const metadata: Record<string, string> = {
     ideType: CODE_ASSIST_METADATA.ideType,
-    platform: CODE_ASSIST_METADATA.platform,
-    pluginType: CODE_ASSIST_METADATA.pluginType,
   };
   if (projectId) {
     metadata.duetProject = projectId;
@@ -128,9 +130,7 @@ export async function loadManagedProject(
   const loadHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${accessToken}`,
-    "User-Agent": "google-api-nodejs-client/9.15.1",
-    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-    "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
+    "User-Agent": getHubUserAgent(),
   };
 
   const loadEndpoints = Array.from(
@@ -173,10 +173,10 @@ export async function onboardManagedProject(
   attempts = 10,
   delayMs = 5000,
 ): Promise<string | undefined> {
-  const metadata = buildMetadata(projectId);
+  // The control plane takes snake_case fields and the client's version, as Antigravity sends them.
   const requestBody: Record<string, unknown> = {
-    tierId,
-    metadata,
+    tier_id: tierId,
+    metadata: { ide_type: "ANTIGRAVITY", ide_version: ANTIGRAVITY_HUB_VERSION, ide_name: "antigravity" },
   };
 
   for (const baseEndpoint of ANTIGRAVITY_ENDPOINT_FALLBACKS) {
@@ -187,9 +187,10 @@ export async function onboardManagedProject(
           {
             method: "POST",
             headers: {
+              Accept: "*/*",
               "Content-Type": "application/json",
               Authorization: `Bearer ${accessToken}`,
-              ...getAntigravityHeaders(),
+              "User-Agent": getHubUserAgent(),
             },
             body: JSON.stringify(requestBody),
           },
@@ -260,8 +261,9 @@ export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<Proj
       return { auth: updatedAuth, effectiveProjectId: managedProjectId };
     };
 
-    // Try to resolve a managed project from Antigravity if possible.
-    const loadPayload = await loadManagedProject(accessToken, parts.projectId ?? fallbackProjectId);
+    // Try to resolve a managed project from Antigravity if possible. The shared fallback project
+    // is not passed as the user's project: the account's own managed project is wanted.
+    const loadPayload = await loadManagedProject(accessToken, parts.projectId);
     const resolvedManagedProjectId = extractManagedProjectId(loadPayload);
 
     if (resolvedManagedProjectId) {

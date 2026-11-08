@@ -7,7 +7,6 @@ import {
   EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
   SKIP_THOUGHT_SIGNATURE,
   getHubUserAgent,
-  getRandomizedHeaders,
   type HeaderStyle,
 } from "../constants";
 import { cacheSignature, getCachedSignature } from "./cache";
@@ -71,7 +70,7 @@ import {
   type ThinkingTier,
 } from "./transform";
 import { detectErrorType } from "./recovery";
-import { getSessionFingerprint, buildFingerprintHeaders, type Fingerprint } from "./fingerprint";
+import type { Fingerprint } from "./fingerprint";
 import type { GoogleSearchConfig } from "./transform/types";
 
 const log = createLogger("request");
@@ -815,13 +814,11 @@ export function prepareAntigravityRequest(
   // requested model and tier map to the exact upstream ID, e.g. gemini-3.8-flash + high →
   // gemini-3.8-flash-high. effectiveModel keeps the name the transformation logic expects.
   let wireModel = effectiveModel;
-  let useHubUserAgent = false;
   const applyUpstreamModel = (tier?: string) => {
     if (headerStyle !== "antigravity") return undefined;
     const upstream = resolveUpstreamModel(rawModel, tier);
     if (!upstream) return undefined;
     wireModel = upstream.upstreamId;
-    useHubUserAgent = upstream.hubOnly;
     return upstream;
   };
   const initialUpstream = applyUpstreamModel(resolved.tier);
@@ -1562,20 +1559,12 @@ export function prepareAntigravityRequest(
   }
 
   if (headerStyle === "antigravity") {
-    // Use randomized headers as the fallback pool for Antigravity mode
-    const selectedHeaders = getRandomizedHeaders("antigravity", requestedModel);
-
-    // Antigravity mode: Match Antigravity Manager behavior
-    // AM only sends User-Agent on content requests — no X-Goog-Api-Client, no Client-Metadata header
-    // (ideType=ANTIGRAVITY goes in request body metadata via project.ts, not as a header)
-    const fingerprint = options?.fingerprint ?? getSessionFingerprint();
-    const fingerprintHeaders = buildFingerprintHeaders(fingerprint);
-
-    headers.set("User-Agent", fingerprintHeaders["User-Agent"] || selectedHeaders["User-Agent"]);
-    // Some models are only served to the current Antigravity client (recorded at discovery).
-    if (useHubUserAgent) {
-      headers.set("User-Agent", getHubUserAgent());
-    }
+    // Content requests carry only the current Antigravity client's User-Agent: no
+    // X-Goog-Api-Client, no Client-Metadata (ideType=ANTIGRAVITY goes in the body via project.ts).
+    // The legacy `antigravity/<ver> <os>/<arch>` User-Agent no longer works: streamed requests
+    // under it get a 200 whose only text is "This version of Antigravity is no longer
+    // supported", and some models are only served to the current client anyway.
+    headers.set("User-Agent", getHubUserAgent());
   } else {
     // Gemini CLI mode: match opencode-gemini-auth Code Assist header set exactly
     headers.set("User-Agent", GEMINI_CLI_HEADERS["User-Agent"]);

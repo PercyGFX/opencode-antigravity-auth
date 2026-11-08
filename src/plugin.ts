@@ -321,6 +321,15 @@ function selectBestVerificationUrl(urls: string[]): string | undefined {
   return unique[0];
 }
 
+/**
+ * True for Google's suspension answer: 403 PERMISSION_DENIED "This service has been disabled in
+ * this account for violation of Terms of Service. Please submit an appeal to continue using this
+ * product."
+ */
+export function isAccountSuspendedError(bodyText: string): boolean {
+  return /disabled in this account for violation of terms of service/i.test(bodyText);
+}
+
 function extractVerificationErrorDetails(bodyText: string): {
   validationRequired: boolean;
   message?: string;
@@ -1484,6 +1493,17 @@ export const createAntigravityPlugin = (providerId: string) => async (
           const urlString = toUrlString(input);
           const family = getModelFamilyFromUrl(urlString);
           const model = extractModelFromUrl(urlString);
+
+          // Plans differ per account (free accounts lack Claude 5.5 and Gemini 4 Argon). Fail
+          // clearly instead of sending the request to accounts that would reject it.
+          if (accountManager.getEnabledAccountsForModel(model).length === 0) {
+            const modelName = (model ? resolveUpstreamModel(model)?.model.name : undefined) ?? model ?? "this model";
+            throw new Error(
+              `None of your enabled Antigravity accounts can use ${modelName}: Antigravity does not offer it on their plans. ` +
+                "Pick another model, or sign in with (or enable) an account whose plan includes it.",
+            );
+          }
+
           const debugLines: string[] = [];
           const pushDebug = (line: string) => {
             if (!isDebugEnabled()) return;
@@ -2286,6 +2306,30 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     lastFailure = createFailureContext(response);
                     shouldSwitchAccount = true;
                     break;
+                  }
+
+                  // Google suspended the account ("This service has been disabled in this account
+                  // for violation of Terms of Service"). It stays that way until an appeal
+                  // succeeds, so take it out of rotation instead of failing every request on it.
+                  if (isAccountSuspendedError(errorBodyText)) {
+                    const label = account.email || `Account ${account.index + 1}`;
+                    accountManager.setAccountEnabled(account.index, false);
+                    // Save now, not on the debounced timer: the process may exit right after.
+                    await accountManager.saveToDisk().catch((error: unknown) => {
+                      log.error("Failed to persist the suspended account", { error: String(error) });
+                    });
+                    getHealthTracker().recordFailure(account.index);
+                    pushDebug(`account-suspended: disabled account ${account.index}`);
+                    log.warn("Google suspended an account (Terms of Service); disabled it", { account: label });
+                    await showToast(
+                      `${label} was suspended by Google (Terms of Service) and is now disabled. Re-enable it after a successful appeal.`,
+                      "warning",
+                    );
+                    lastFailure = createFailureContext(response);
+                    if (accountManager.getEnabledAccountsForModel(model).length > 0) {
+                      shouldSwitchAccount = true;
+                      break;
+                    }
                   }
                 }
 

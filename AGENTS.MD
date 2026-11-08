@@ -90,6 +90,7 @@ OpenCode 2 does not run 1.x plugins. The v2 adapter registers the `google-antigr
 - v2 types come from `@opencode/plugin` (dev dependency, pinned to the OpenCode version); OpenCode provides it at runtime. `@opencode-ai/plugin` 0.15 is the 1.x SDK.
 - Never call the v1 `auth.loader` without an OAuth credential: it clears `antigravity-accounts.json`.
 - Models come from `src/plugin/model-registry.ts` (Antigravity's Recommended list via `model-discovery.ts`); don't hardcode model IDs or per-version routing. Never mark catalog models `deprecated`: OpenCode's model picker hides them.
+- Plans differ per account (free: Claude 4.6; paid Pro: Claude 5.5, Gemini 4 Argon). Discovery runs per account (`account-models.ts`), stores each account's `availableModels` in the pool, and the catalog is the union. `AccountManager` only selects accounts whose list has the requested model; keep that filter in every selection path.
 - `prepareAntigravityRequest()` keeps `effectiveModel` for name-based logic and sends `wireModel` (the registry's upstream ID). Registry models never fall back to the Gemini CLI quota.
 - RPC methods (`rpc.ts`) need an `output` schema and a declared `errors` map; undeclared errors reach the TUI as "RPC call failed".
 - Pool changes go through `getActiveAccountManager()` when the pipeline is running; removals must use `saveToDisk({ replace: true })`.
@@ -140,7 +141,7 @@ Tool schemas are cleaned via allowlist. Unsupported fields (`const`, `$ref`, `$d
 Accounts rotate on rate limits. Gemini has dual quota pools (Antigravity headers + Gemini CLI headers). Fingerprints are per-account and regenerated on capacity exhaustion.
 
 ### 6. Fingerprint System
-Per-account device fingerprints stored in `antigravity-accounts.json`. Each fingerprint includes deviceId, sessionToken, userAgent, and a reduced clientMetadata (ideType, platform, pluginType — no osVersion, arch, or sqmId). The only header composed is `User-Agent`, built by `buildFingerprintHeaders()` in `fingerprint.ts` and applied on the antigravity request path in `request.ts`. History tracked (max 5), restorable.
+Per-account device fingerprints stored in `antigravity-accounts.json`. Each fingerprint includes deviceId, sessionToken, userAgent, and a reduced clientMetadata (ideType, platform, pluginType — no osVersion, arch, or sqmId). Content requests on the antigravity path send only the current client's `User-Agent` (`getHubUserAgent()` in `constants.ts`); keep `ANTIGRAVITY_HUB_VERSION`/`ANTIGRAVITY_HUB_CL` current, since older clients get "This version of Antigravity is no longer supported" as the streamed reply. History tracked (max 5), restorable.
 
 ## Dependencies
 

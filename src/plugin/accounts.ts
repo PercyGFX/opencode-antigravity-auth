@@ -5,6 +5,7 @@ import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
 import { generateFingerprint, updateFingerprintVersion, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
 import type { QuotaGroup, QuotaGroupSummary } from "./quota";
+import { modelUpstreamIds } from "./model-registry";
 import { getModelFamily } from "./transform/model-resolver";
 import { debugLogToFile } from "./debug";
 import { formatAccountLabel } from "./logging-utils";
@@ -153,10 +154,27 @@ export interface ManagedAccount {
   verificationRequiredAt?: number;
   verificationRequiredReason?: string;
   verificationUrl?: string;
+  /** Upstream model IDs this account may call (see `AccountMetadataV3.availableModels`). */
+  availableModels?: string[];
+  availableModelsUpdatedAt?: number;
 }
 
 function nowMs(): number {
   return Date.now();
+}
+
+/**
+ * Whether the account can serve the requested model. Plans differ (free accounts lack Claude 5.5
+ * and Gemini 4 Argon, and Antigravity answers them with errors that look like rate limits), so
+ * selection skips accounts whose discovered list lacks every upstream ID of the model. Accounts
+ * not yet discovered, and models the registry does not know, are not filtered.
+ */
+function accountHasModel(account: ManagedAccount, model?: string | null): boolean {
+  if (!model || !account.availableModels) return true;
+  const upstreamIds = modelUpstreamIds(model);
+  if (!upstreamIds) return true;
+  const available = account.availableModels;
+  return upstreamIds.some((id) => available.includes(id));
 }
 
 function clampNonNegativeInt(value: unknown, fallback: number): number {
@@ -367,6 +385,8 @@ export class AccountManager {
             verificationRequiredAt: acc.verificationRequiredAt,
             verificationRequiredReason: acc.verificationRequiredReason,
             verificationUrl: acc.verificationUrl,
+            availableModels: acc.availableModels,
+            availableModelsUpdatedAt: acc.availableModelsUpdatedAt,
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
@@ -466,7 +486,12 @@ export class AccountManager {
   }
 
   getAccountsSnapshot(): ManagedAccount[] {
-    return this.accounts.map((a) => ({ ...a, parts: { ...a.parts }, rateLimitResetTimes: { ...a.rateLimitResetTimes } }));
+    return this.accounts.map((a) => ({
+      ...a,
+      parts: { ...a.parts },
+      rateLimitResetTimes: { ...a.rateLimitResetTimes },
+      availableModels: a.availableModels ? [...a.availableModels] : undefined,
+    }));
   }
 
   getCurrentAccountForFamily(family: ModelFamily): ManagedAccount | null {
@@ -529,7 +554,7 @@ export class AccountManager {
       const tokenTracker = getTokenTracker();
       
       const accountsWithMetrics: AccountWithMetrics[] = this.accounts
-        .filter(acc => acc.enabled !== false)
+        .filter(acc => acc.enabled !== false && accountHasModel(acc, model))
         .map(acc => {
           clearExpiredRateLimits(acc);
           return {
@@ -576,7 +601,7 @@ export class AccountManager {
     }
 
     const current = this.getCurrentAccountForFamily(family);
-    if (current) {
+    if (current && accountHasModel(current, model)) {
       clearExpiredRateLimits(current);
       const isLimitedForRequestedStyle = isRateLimitedForHeaderStyle(current, family, headerStyle, model);
       const isOverThreshold = isOverSoftQuotaThreshold(current, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
@@ -597,8 +622,9 @@ export class AccountManager {
   getNextForFamily(family: ModelFamily, model?: string | null, headerStyle: HeaderStyle = "antigravity", softQuotaThresholdPercent: number = 100, softQuotaCacheTtlMs: number = 10 * 60 * 1000): ManagedAccount | null {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
-      return a.enabled !== false && 
-             !isRateLimitedForHeaderStyle(a, family, headerStyle, model) && 
+      return a.enabled !== false &&
+             accountHasModel(a, model) &&
+             !isRateLimitedForHeaderStyle(a, family, headerStyle, model) &&
              !isOverSoftQuotaThreshold(a, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model) &&
              !this.isAccountCoolingDown(a);
     });
@@ -735,7 +761,8 @@ export class AccountManager {
     return this.accounts.filter(acc => {
       clearExpiredRateLimits(acc);
       return acc.enabled !== false &&
-             this.isFreshForQuota(acc, quotaKey) && 
+             accountHasModel(acc, model) &&
+             this.isFreshForQuota(acc, quotaKey) &&
              !isRateLimitedForFamily(acc, family, model) && 
              !this.isAccountCoolingDown(acc);
     });
@@ -792,8 +819,8 @@ export class AccountManager {
       if (acc.index === currentAccountIndex) {
         return false;
       }
-      // Skip disabled accounts
-      if (acc.enabled === false) {
+      // Skip disabled accounts and accounts without the model
+      if (acc.enabled === false || !accountHasModel(acc, model)) {
         return false;
       }
       // Skip cooling down accounts
@@ -951,7 +978,8 @@ export class AccountManager {
     headerStyle?: HeaderStyle,
     strict?: boolean,
   ): number {
-    const available = this.accounts.filter((a) => {
+    const candidates = this.accounts.filter((a) => accountHasModel(a, model));
+    const available = candidates.filter((a) => {
       clearExpiredRateLimits(a);
       return a.enabled !== false && (strict && headerStyle
         ? !isRateLimitedForHeaderStyle(a, family, headerStyle, model)
@@ -962,7 +990,7 @@ export class AccountManager {
     }
 
     const waitTimes: number[] = [];
-    for (const a of this.accounts) {
+    for (const a of candidates) {
       if (family === "claude") {
         const t = a.rateLimitResetTimes.claude;
         if (t !== undefined) waitTimes.push(Math.max(0, t - nowMs()));
@@ -1023,6 +1051,8 @@ export class AccountManager {
         verificationRequiredAt: a.verificationRequiredAt,
         verificationRequiredReason: a.verificationRequiredReason,
         verificationUrl: a.verificationUrl,
+        availableModels: a.availableModels,
+        availableModelsUpdatedAt: a.availableModelsUpdatedAt,
       })),
       activeIndex: claudeIndex,
       activeIndexByFamily: {
@@ -1164,6 +1194,20 @@ export class AccountManager {
     return [...account.fingerprintHistory];
   }
 
+  /** Enabled accounts that can serve the model (all enabled accounts while lists are unknown). */
+  getEnabledAccountsForModel(model?: string | null): ManagedAccount[] {
+    return this.getEnabledAccounts().filter((account) => accountHasModel(account, model));
+  }
+
+  /** Stores a discovered model list on the account holding `refreshToken`. */
+  setAvailableModels(refreshToken: string, availableModels: string[], updatedAt: number = nowMs()): boolean {
+    const account = this.accounts.find((entry) => entry.parts.refreshToken === refreshToken);
+    if (!account || (account.availableModelsUpdatedAt ?? 0) > updatedAt) return false;
+    account.availableModels = [...availableModels];
+    account.availableModelsUpdatedAt = updatedAt;
+    return true;
+  }
+
   updateQuotaCache(accountIndex: number, quotaGroups: Partial<Record<QuotaGroup, QuotaGroupSummary>>): void {
     const account = this.accounts[accountIndex];
     if (account) {
@@ -1201,7 +1245,7 @@ export class AccountManager {
 
   areAllAccountsOverSoftQuota(family: ModelFamily, thresholdPercent: number, cacheTtlMs: number, model?: string | null): boolean {
     if (thresholdPercent >= 100) return false;
-    const enabled = this.accounts.filter(a => a.enabled !== false);
+    const enabled = this.accounts.filter(a => a.enabled !== false && accountHasModel(a, model));
     if (enabled.length === 0) return false;
     return enabled.every(a => isOverSoftQuotaThreshold(a, family, thresholdPercent, cacheTtlMs, model));
   }
@@ -1219,8 +1263,8 @@ export class AccountManager {
     model?: string | null
   ): number | null {
     if (thresholdPercent >= 100) return 0;
-    
-    const enabled = this.accounts.filter(a => a.enabled !== false);
+
+    const enabled = this.accounts.filter(a => a.enabled !== false && accountHasModel(a, model));
     if (enabled.length === 0) return null;
     
     // If any account is available (not over threshold), no wait needed

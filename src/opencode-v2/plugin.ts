@@ -10,10 +10,10 @@ import {
   persistAccountPool,
   shouldSkipLocalServer,
 } from "../plugin";
+import { applyPoolModels, discoverPoolModels, type PoolModelsAccount } from "../plugin/account-models";
 import { isOAuthAuth, parseRefreshParts } from "../plugin/auth";
 import { createLogger } from "../plugin/logger";
-import { discoverRegistryModels } from "../plugin/model-discovery";
-import { getRegistryFetchedAt, setRegistryModels } from "../plugin/model-registry";
+import { getRegistryFetchedAt } from "../plugin/model-registry";
 import { startOAuthListener, type OAuthListener } from "../plugin/server";
 import { loadAccounts } from "../plugin/storage";
 import { refreshAccessToken } from "../plugin/token";
@@ -41,6 +41,8 @@ const LOGIN_HINT = `Run \`opencode auth login ${ANTIGRAVITY_INTEGRATION_ID}\` to
 
 /** How long a discovered model list is used before asking Antigravity again. */
 const MODEL_DISCOVERY_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/** After a failed discovery, ask again this much later rather than on every request. */
+const MODEL_DISCOVERY_RETRY_MS = 5 * 60 * 1000;
 
 /** OpenCode drops an unfinished sign-in after 10 minutes; give up on the browser well before. */
 const BROWSER_CALLBACK_TIMEOUT_MS = 9 * 60 * 1000;
@@ -163,33 +165,81 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
         return pipeline.fetch;
       };
 
-      // Model discovery: ask Antigravity what it recommends and rebuild the catalog, so new
-      // models appear (and retired ones disappear) without a plugin update.
+      // Model discovery: ask Antigravity which models each account can use (plans differ: free
+      // accounts lack Claude 5.5 and Gemini 4 Argon). The catalog offers every model one account
+      // has, and the pipeline routes each request to accounts that have its model. New models
+      // appear (and retired ones disappear) without a plugin update.
       let discovering: Promise<void> | undefined;
-      const refreshModels = (accessToken: string, projectId: string): Promise<void> => {
-        discovering ??= (async () => {
-          try {
-            setRegistryModels(await discoverRegistryModels(accessToken, projectId));
-            await ctx.provider.reload();
-          } catch (error) {
-            log.warn("model discovery failed; keeping the current model list", { error: String(error) });
-          } finally {
-            discovering = undefined;
-          }
-        })();
-        return discovering;
-      };
-      const refreshModelsIfStale = async (): Promise<void> => {
-        const fetchedAt = getRegistryFetchedAt();
-        if (fetchedAt !== undefined && Date.now() - fetchedAt < MODEL_DISCOVERY_INTERVAL_MS) return;
+      /** When every account's model list was last known to be fresh; undefined until checked. */
+      let modelsFreshAt: number | undefined;
+
+      /** The pool's accounts plus `extra` (a sign-in that just finished); the login if neither. */
+      const discoveryAccounts = async (extra: PoolModelsAccount[]): Promise<PoolModelsAccount[]> => {
+        const stored: PoolModelsAccount[] = (await loadAccounts().catch(() => null))?.accounts ?? [];
+        const byToken = new Map(stored.map((account) => [account.refreshToken, account] as const));
+        for (const account of extra) {
+          byToken.set(account.refreshToken, { ...byToken.get(account.refreshToken), ...account });
+        }
+        if (byToken.size > 0) return [...byToken.values()];
         const auth = await getAuth();
-        if (!isOAuthAuth(auth) || !auth.access) return;
+        if (!isOAuthAuth(auth)) return [];
         const parts = parseRefreshParts(auth.refresh);
-        await refreshModels(auth.access, parts.managedProjectId || parts.projectId || "");
+        if (!parts.refreshToken) return [];
+        return [{ ...parts, refreshToken: parts.refreshToken, access: auth.access, expires: auth.expires }];
+      };
+
+      const discoverModels = async (extra: PoolModelsAccount[]): Promise<void> => {
+        try {
+          const accounts = await discoveryAccounts(extra);
+          if (accounts.length === 0) return;
+          const results = await discoverPoolModels(accounts, client, ANTIGRAVITY_PROVIDER_ID);
+          if (!(await applyPoolModels(results, getActiveAccountManager()))) {
+            throw new Error(results.map((result) => result.error).filter(Boolean).join("; ") || "no account answered");
+          }
+          modelsFreshAt = Date.now();
+          await ctx.provider.reload();
+        } catch (error) {
+          modelsFreshAt = Date.now() - MODEL_DISCOVERY_INTERVAL_MS + MODEL_DISCOVERY_RETRY_MS;
+          log.warn("model discovery failed; keeping the current model list", { error: String(error) });
+        }
+      };
+
+      /** Runs one discovery at a time; a sign-in during a run gets its own run afterwards. */
+      const refreshModels = (extra: PoolModelsAccount[] = []): Promise<void> => {
+        if (discovering && extra.length === 0) return discovering;
+        const run: Promise<void> = (discovering ?? Promise.resolve())
+          .then(() => discoverModels(extra))
+          .finally(() => {
+            if (discovering === run) discovering = undefined;
+          });
+        discovering = run;
+        return run;
+      };
+
+      /** When the stored lists were discovered (the oldest account's), or undefined if any is missing. */
+      const storedModelsFreshAt = async (): Promise<number | undefined> => {
+        const registryAt = getRegistryFetchedAt();
+        if (registryAt === undefined) return undefined;
+        let oldest = registryAt;
+        for (const account of (await loadAccounts().catch(() => null))?.accounts ?? []) {
+          if (account.availableModelsUpdatedAt === undefined) return undefined;
+          oldest = Math.min(oldest, account.availableModelsUpdatedAt);
+        }
+        return oldest;
+      };
+
+      const refreshModelsIfStale = async (): Promise<void> => {
+        modelsFreshAt ??= await storedModelsFreshAt();
+        if (modelsFreshAt !== undefined && Date.now() - modelsFreshAt < MODEL_DISCOVERY_INTERVAL_MS) return;
+        if (!isOAuthAuth(await getAuth())) return;
+        await refreshModels();
       };
 
       const proxy = await startLoopbackProxy(async (url, init) => {
-        void refreshModelsIfStale().catch(() => {});
+        // Until the accounts' model lists are known, a request could go to an account whose plan
+        // lacks the model; the first request waits for them, later ones refresh in the background.
+        const refreshing = refreshModelsIfStale().catch(() => {});
+        if (modelsFreshAt === undefined) await refreshing;
         const fetchThroughPipeline = await getPipeline();
         return fetchThroughPipeline(url, init);
       });
@@ -218,7 +268,19 @@ export function createAntigravityV2Plugin(): Plugin.Plugin {
         rememberEmail(result.refresh, result.email);
         pipeline = undefined;
         log.info("account added", { email: result.email });
-        void refreshModels(result.access, result.projectId);
+        const parts = parseRefreshParts(result.refresh);
+        if (parts.refreshToken) {
+          void refreshModels([
+            {
+              ...parts,
+              refreshToken: parts.refreshToken,
+              projectId: parts.projectId || result.projectId,
+              email: result.email,
+              access: result.access,
+              expires: result.expires,
+            },
+          ]);
+        }
 
         return Credential.OAuth.make({
           type: "oauth",

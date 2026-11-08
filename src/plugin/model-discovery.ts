@@ -40,6 +40,41 @@ async function fetchAvailableModels(
   return (await response.json()) as AvailableModelsResponse;
 }
 
+/** What one account can use. */
+export interface AccountModelDiscovery {
+  /** Catalog entries from the account's Recommended list. */
+  models: RegistryModel[];
+  /** Every upstream model ID the account may call; models it lacks are missing (plan-dependent). */
+  available: string[];
+}
+
+/**
+ * Asks Antigravity which models this account can use. Throws when the list cannot be fetched or
+ * has no recommended models, so callers keep what they had.
+ */
+export async function discoverAccountModels(
+  accessToken: string,
+  projectId: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<AccountModelDiscovery> {
+  const requestUserAgent = buildFingerprintHeaders(getSessionFingerprint())["User-Agent"];
+  const [hub, regular] = await Promise.all([
+    fetchAvailableModels(accessToken, projectId, getHubUserAgent(), fetchImpl),
+    requestUserAgent
+      ? fetchAvailableModels(accessToken, projectId, requestUserAgent, fetchImpl)
+      : Promise.resolve<AvailableModelsResponse>({}),
+  ]);
+
+  const legacyIds = Object.keys(regular.models ?? {});
+  const models = buildRegistryModels(hub, requestUserAgent ? new Set(legacyIds) : undefined);
+  if (models.length === 0) {
+    throw new Error("Antigravity returned no recommended models");
+  }
+  const available = [...new Set([...Object.keys(hub.models ?? {}), ...legacyIds])];
+  log.info("discovered models", { count: models.length, ids: models.map((model) => model.id) });
+  return { models, available };
+}
+
 /**
  * Returns the models Antigravity currently recommends for this account. Throws when the list
  * cannot be fetched or comes back empty, so callers keep their current list.
@@ -49,18 +84,5 @@ export async function discoverRegistryModels(
   projectId: string,
   fetchImpl: FetchLike = fetch,
 ): Promise<RegistryModel[]> {
-  const requestUserAgent = buildFingerprintHeaders(getSessionFingerprint())["User-Agent"];
-  const [hub, regular] = await Promise.all([
-    fetchAvailableModels(accessToken, projectId, getHubUserAgent(), fetchImpl),
-    requestUserAgent
-      ? fetchAvailableModels(accessToken, projectId, requestUserAgent, fetchImpl)
-      : Promise.resolve<AvailableModelsResponse>({}),
-  ]);
-
-  const models = buildRegistryModels(hub, requestUserAgent ? new Set(Object.keys(regular.models ?? {})) : undefined);
-  if (models.length === 0) {
-    throw new Error("Antigravity returned no recommended models");
-  }
-  log.info("discovered models", { count: models.length, ids: models.map((model) => model.id) });
-  return models;
+  return (await discoverAccountModels(accessToken, projectId, fetchImpl)).models;
 }

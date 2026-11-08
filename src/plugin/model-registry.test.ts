@@ -270,15 +270,21 @@ describe("prepareAntigravityRequest with registry models", () => {
     expect(body.request.generationConfig?.thinkingConfig?.thinkingLevel).toBe("high");
   });
 
-  it("routes Gemini 3.1 Pro High to its renamed upstream model without the hub User-Agent", () => {
-    const { body, userAgent } = prepare("antigravity-gemini-3.1-pro", { thinkingConfig: { thinkingLevel: "high" } });
+  it("routes Gemini 3.1 Pro High to its renamed upstream model", () => {
+    const { body } = prepare("antigravity-gemini-3.1-pro", { thinkingConfig: { thinkingLevel: "high" } });
     expect(body.model).toBe("gemini-pro-agent");
-    expect(userAgent).not.toContain("antigravity/hub/");
   });
 
   it("leaves models outside the registry to the existing name handling", () => {
-    const { body, userAgent } = prepare("antigravity-gemini-3-pro");
+    const { body } = prepare("antigravity-gemini-3-pro");
     expect(body.model).toBe("gemini-3-pro-low");
-    expect(userAgent).not.toContain("antigravity/hub/");
+  });
+
+  it("sends the current client's User-Agent for every model", () => {
+    // Under the legacy `antigravity/<ver> <os>/<arch>` User-Agent, streamed requests get a 200
+    // whose only text is "This version of Antigravity is no longer supported".
+    for (const model of ["antigravity-gemini-3.1-pro", "antigravity-gemini-3-pro", "antigravity-gemini-3.8-flash"]) {
+      expect(prepare(model).userAgent).toMatch(/^antigravity\/hub\/2\.23\.0 \(aidev_client; .*cl=1007378935\)$/);
+    }
   });
 });

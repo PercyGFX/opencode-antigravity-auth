@@ -95,6 +95,15 @@ function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/**
+ * Placeholders Antigravity lists for models the plan does not include, e.g. "Gemini 4 Argon"
+ * (`gemini-4-argon-disabled`, tagged "Unavailable: ... available to Ultra and paid Pro plan
+ * subscribers") on free accounts. They cannot be called, so they never enter the catalog.
+ */
+function isUnavailablePlaceholder(upstreamId: string, info: AvailableModelInfo): boolean {
+  return /-disabled$/i.test(upstreamId) || /^unavailable$/i.test(info.tagTitle?.trim() ?? "");
+}
+
 function recommendedIds(response: AvailableModelsResponse): string[] {
   const ids: string[] = [];
   for (const sort of response.agentModelSorts ?? []) {
@@ -122,7 +131,7 @@ export function buildRegistryModels(
 
   for (const upstreamId of recommendedIds(hubResponse)) {
     const info = hubResponse.models?.[upstreamId];
-    if (!info) continue;
+    if (!info || isUnavailablePlaceholder(upstreamId, info)) continue;
     const displayName = info.displayName?.trim() || upstreamId;
     const match = TIER_SUFFIX.exec(displayName);
     const base = match?.[1] ?? displayName;
@@ -174,6 +183,40 @@ export function buildRegistryModels(
 }
 
 /**
+ * Combines the lists discovered for several accounts into one catalog. Accounts on different
+ * plans see different models (free: Claude 4.6; paid Pro: Claude 5.5, Gemini 4 Argon), so the
+ * catalog offers every model at least one account has; request routing then only picks accounts
+ * that have the requested model (see `AccountManager`).
+ *
+ * The first list to mention a model supplies its details. Variants are combined by tier, and an
+ * upstream ID counts as hub-only when any account reports it so (the hub User-Agent serves every
+ * listed model, the legacy one does not).
+ */
+export function mergeRegistryModels(lists: readonly (readonly RegistryModel[])[]): RegistryModel[] {
+  const merged = new Map<string, RegistryModel>();
+  for (const list of lists) {
+    for (const model of list) {
+      const existing = merged.get(model.id);
+      if (!existing) {
+        merged.set(model.id, { ...model, variants: model.variants.map((variant) => ({ ...variant })) });
+        continue;
+      }
+      if (model.upstreamId === existing.upstreamId) existing.hubOnly ||= model.hubOnly;
+      for (const variant of model.variants) {
+        const known = existing.variants.find((entry) => entry.tier === variant.tier);
+        if (known) {
+          if (known.upstreamId === variant.upstreamId) known.hubOnly ||= variant.hubOnly;
+        } else {
+          existing.variants.push({ ...variant });
+        }
+      }
+      existing.variants.sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier));
+    }
+  }
+  return [...merged.values()];
+}
+
+/**
  * Snapshot of Antigravity's Recommended list (hub User-Agent), taken 2026-10-13. Used until the
  * first discovery succeeds. Refresh it with `node scripts/list-models.mjs --json`.
  */
@@ -212,7 +255,8 @@ export function builtinRegistryModels(): RegistryModel[] {
 // ---------------------------------------------------------------------------
 
 const CACHE_FILENAME = "antigravity-models.json";
-const CACHE_VERSION = 1;
+/** 2: the list combines every account's models (1 held a single account's list). */
+const CACHE_VERSION = 2;
 
 interface RegistryCacheFile {
   version: number;
@@ -324,6 +368,17 @@ export function resolveUpstreamModel(requestedModel: string, tier?: string): Ups
     }
   }
   return undefined;
+}
+
+/**
+ * Every upstream ID a requested model can be sent as (its default ID and all tier variants), or
+ * undefined for models the registry does not know. Used to check whether an account has a model.
+ */
+export function modelUpstreamIds(requestedModel: string): string[] | undefined {
+  const resolved = resolveUpstreamModel(requestedModel);
+  if (!resolved) return undefined;
+  const { model } = resolved;
+  return [...new Set([model.upstreamId, ...model.variants.map((variant) => variant.upstreamId)])];
 }
 
 /** True when the upstream ID is only served to the current Antigravity client. */

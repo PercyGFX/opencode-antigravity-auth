@@ -150,9 +150,14 @@ export function getRandomizedHeaders(style: HeaderStyle, model?: string): Header
  * models (e.g. Gemini 3.7/3.8 Flash tiers) to this client: their IDs are missing from
  * `fetchAvailableModels` and return 404 under the legacy `antigravity/<ver> <os>/<arch>` UA.
  * Model discovery records which IDs need it (see `src/plugin/model-registry.ts`).
+ *
+ * Keep these current: Antigravity hides newer models (e.g. Gemini 4 Argon) from older clients
+ * and answers them with "This version of Antigravity is no longer supported". The version is
+ * the latest Antigravity release; the CL is `languageServerCL` from an installed Antigravity's
+ * `resources/app/product.json`. Last updated 2026-11-09.
  */
-export const ANTIGRAVITY_HUB_VERSION = "2.8.0";
-export const ANTIGRAVITY_HUB_CL = "963137146";
+export const ANTIGRAVITY_HUB_VERSION = "2.23.0";
+export const ANTIGRAVITY_HUB_CL = "1007378935";
 
 export function getHubUserAgent(): string {
   const osType = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
