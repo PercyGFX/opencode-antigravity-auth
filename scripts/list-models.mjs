@@ -17,7 +17,8 @@ const CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleuse
 const CLIENT_SECRET = "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";
 const CLOUD_CODE_BASE = "https://cloudcode-pa.googleapis.com";
 const LEGACY_UA = "antigravity/1.15.8 windows/amd64";
-const HUB_UA = "antigravity/hub/2.8.0 (aidev_client; os_type=windows; arch=amd64; cl=963137146)";
+// Keep in step with ANTIGRAVITY_HUB_VERSION / ANTIGRAVITY_HUB_CL in src/constants.ts.
+const HUB_UA = "antigravity/hub/2.23.0 (aidev_client; os_type=windows; arch=amd64; cl=1007378935)";
 
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
